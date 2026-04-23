@@ -1,0 +1,10 @@
+# https://docs.railway.com/reference/config-as-code
+# Сервис без HTTP: в панели Railway создай «Empty» / Worker и укажи этот репозиторий.
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python bot.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

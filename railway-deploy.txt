@@ -1,0 +1,16 @@
+Деплой vk-prof-bot на Railway (кратко)
+
+1. Создай проект на railway.app → New Project → Deploy from GitHub (или CLI).
+
+2. Добавь сервис без публичного URL: «Empty service» или тот же репозиторий с типом Worker — бот только опрашивает lp.vk.com, входящий HTTP не нужен.
+
+3. Variables (обязательно):
+   VK_TOKEN     — ключ доступа сообщества (управление → API → ключи).
+   VK_GROUP_ID  — ID группы (целое число, как в коде VkBotLongPoll).
+
+4. Опционально SQLITE_PATH=/data/career_bot.db — если добавишь Volume:
+   New → Volume → примонтируй к /data, чтобы база не терялась при redeploy.
+
+5. Deploy: Nixpacks подхватит requirements.txt и runtime.txt; старт из railway.toml: python bot.py.
+
+6. Логи: вкладка Deployments → View logs. Ошибка «Не задан VK_TOKEN» — переменные не заданы в этом сервисе.
