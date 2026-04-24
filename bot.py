@@ -553,11 +553,11 @@ def build_menu_keyboard():
     kb.add_line()
     kb.add_button(KB_PROF_TABLE, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
-    kb.add_button(KB_KETTELL, color=VkKeyboardColor.SECONDARY)
-    kb.add_button(KB_RAVEN, color=VkKeyboardColor.SECONDARY)
+    kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_RAVEN, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
-    kb.add_button(KB_EN60, color=VkKeyboardColor.SECONDARY)
-    kb.add_button(KB_EN57, color=VkKeyboardColor.SECONDARY)
+    kb.add_button(KB_EN60, color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_EN57, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button("Меню", color=VkKeyboardColor.SECONDARY)
     return kb.get_keyboard()
@@ -806,13 +806,7 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("опг", "opg"):
         start_test(vk, user_id, TEST_OPG)
         return True
-    if t in ("голланд", "голландия", "holland", "тест голланда"):
-        start_test(vk, user_id, TEST_OPG)
-        return True
     if t in ("таблица", "таблица опт", "опт"):
-        start_test(vk, user_id, TEST_JOVASHI)
-        return True
-    if t in ("йовайши", "йоваши", "jovashi", "иовайши"):
         start_test(vk, user_id, TEST_JOVASHI)
         return True
     if t in ("кеттелл", "kettell", "cattell"):
@@ -834,13 +828,7 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if stripped == KB_OPG:
         start_test(vk, user_id, TEST_OPG)
         return True
-    if stripped in ("Голланд",):
-        start_test(vk, user_id, TEST_OPG)
-        return True
     if stripped == KB_PROF_TABLE:
-        start_test(vk, user_id, TEST_JOVASHI)
-        return True
-    if stripped in ("Йовайши", "Йоваши"):
         start_test(vk, user_id, TEST_JOVASHI)
         return True
     if stripped == KB_KETTELL:
