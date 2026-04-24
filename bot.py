@@ -42,8 +42,33 @@ _LONGPOLL_TRANSIENT = (
 )
 
 TEST_DDO = "ddo"
+# Внутренние id сохранены для совместимости с уже сохранёнными сессиями в БД
 TEST_HOLLAND = "holland"
 TEST_JOVASHI = "jovashi"
+LABEL_OPG = "ОПГ (опросник прогресс. готовности)"
+LABEL_PROF_TABLE = (
+    "Таблица для ориентиаровочн. определ. предпочтительности типа будущей профессии"
+)
+LABEL_KETTELL = "Кеттелл"
+LABEL_RAVEN = "Равен"
+LABEL_EN60 = "ЭН - 60"
+LABEL_EN57 = "ЭН - 57"
+
+# Подписи на кнопках клавиатуры (лимит ВК)
+KB_OPG = "ОПГ"
+KB_PROF_TABLE = "Таблица (ОПТ проф.)"
+KB_KETTELL = "Кеттелл"
+KB_RAVEN = "Равен"
+KB_EN60 = "ЭН - 60"
+KB_EN57 = "ЭН - 57"
+
+STUB_TESTS = frozenset({TEST_KETTELL, TEST_RAVEN, TEST_EN60, TEST_EN57})
+STUB_LABELS = {
+    TEST_KETTELL: LABEL_KETTELL,
+    TEST_RAVEN: LABEL_RAVEN,
+    TEST_EN60: LABEL_EN60,
+    TEST_EN57: LABEL_EN57,
+}
 
 # --- ДДО (Е.А. Климов) ---
 PROFESSION_TYPES = {
@@ -205,7 +230,7 @@ CAREER_HINTS_DDO = {
     "Ч-Х": "🎨 Человек-Художественный образ\n\nТебе подходят творческие профессии: дизайнер, художник, музыкант, актер, писатель, архитектор.\n\nРекомендация: развивай творческие способности, изучай искусство.",
 }
 
-# --- Голланд (RIASEC), короткий «одно из двух» ---
+# --- ОПГ: тот же блок вопросов, что ранее (RIASEC «одно из двух») ---
 HOLLAND_TYPES = {
     "R": "Реалистический (практический) тип",
     "I": "Исследовательский тип",
@@ -251,7 +276,7 @@ CAREER_HINTS_HOLLAND = {
     "C": "📋 Конвенциональный тип — порядок, данные, правила. Бухгалтер, экономист, делопроизводитель, логистика.",
 }
 
-# --- Йовайши (модификация Резапкиной), вопросы из JSON ---
+# --- Таблица ОПТ: вопросы из JSON (модификация Резапкиной) ---
 with open(JOVASHI_PATH, encoding="utf-8") as _f:
     QUESTIONS_JOVASHI = json.load(_f)
 
@@ -275,14 +300,15 @@ CAREER_HINTS_JOVASHI = {
 
 WELCOME_TEXT = (
     "Привет! Это бот для прохождения профориентации.\n\n"
-    "Здесь можно пройти три методики:\n"
+    "Доступные методики:\n"
     "• ДДО — дифференциально-диагностический опросник Е.А. Климова (20 вопросов, выбор из двух занятий).\n"
-    "• Голланд — короткий тест на тип личности по Дж. Голланду (RIASEC, 24 вопроса).\n"
-    "• Йовайши — опросник профессиональных склонностей Л.А. Йовайши в модификации Г.В. Резапкиной (24 вопроса, три варианта).\n\n"
+    f"• {LABEL_OPG} — 24 вопроса, выбор из двух вариантов.\n"
+    f"• {LABEL_PROF_TABLE} — 24 вопроса, три варианта ответа.\n"
+    f"• {LABEL_KETTELL}, {LABEL_RAVEN}, {LABEL_EN60}, {LABEL_EN57} — скоро.\n\n"
     "Команды (можно писать в чат):\n"
     "— ддо — начать ДДО;\n"
-    "— голланд — начать тест Голланда;\n"
-    "— йовайши — начать тест Йовайши;\n"
+    "— опг — начать ОПГ;\n"
+    "— таблица — начать таблицу для ориентировочного определения предпочтительности типа будущей профессии;\n"
     "— привет, старт или меню — это сообщение и кнопки.\n\n"
     "Отвечай на вопросы кнопками под сообщением. Удачи!"
 )
@@ -497,9 +523,15 @@ def build_answer_keyboard_jovashi():
 def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
     kb.add_button("ДДО", color=VkKeyboardColor.POSITIVE)
-    kb.add_button("Голланд", color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_OPG, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
-    kb.add_button("Йовайши", color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_PROF_TABLE, color=VkKeyboardColor.POSITIVE)
+    kb.add_line()
+    kb.add_button(KB_KETTELL, color=VkKeyboardColor.SECONDARY)
+    kb.add_button(KB_RAVEN, color=VkKeyboardColor.SECONDARY)
+    kb.add_line()
+    kb.add_button(KB_EN60, color=VkKeyboardColor.SECONDARY)
+    kb.add_button(KB_EN57, color=VkKeyboardColor.SECONDARY)
     kb.add_line()
     kb.add_button("Меню", color=VkKeyboardColor.SECONDARY)
     return kb.get_keyboard()
@@ -560,14 +592,14 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         lines.append(f"\n{CAREER_HINTS_DDO.get(best_key, 'Выбирай направление, которое откликается сильнее.')}")
         lines.append("\nХочешь пройти снова — выбери тест кнопкой или командой.")
     elif test_id == TEST_HOLLAND:
-        lines = ["📊 Твой результат по тесту Голланда (топ-3):"]
+        lines = [f"📊 Твой результат по «{LABEL_OPG}» (топ-3):"]
         for i, (code, points) in enumerate(top3, 1):
             lines.append(f"{i}. {HOLLAND_TYPES[code]} — {points} баллов")
         lines.append(f"\n{CAREER_HINTS_HOLLAND.get(best_key, '')}")
         lines.append("\nКод RIASEC по убыванию: " + "".join(k for k, _ in sorted_types[:3] if _ > 0) + ".")
         lines.append("\nМожно пройти другой тест — открой «Меню» или нажми кнопку.")
     else:
-        lines = ["📊 Твой результат по методике Йовайши (топ-3 сферы):"]
+        lines = [f"📊 Твой результат по «{LABEL_PROF_TABLE}» (топ-3 сферы):"]
         for i, (key, points) in enumerate(top3, 1):
             interp = _interpret_jovashi(points)
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
@@ -586,14 +618,23 @@ def start_test(vk, user_id: int, test_id: str):
     if test_id == TEST_DDO:
         intro = f"Тест ДДО (Климов) запущен.\nВопросов: {len(qs)}."
     elif test_id == TEST_HOLLAND:
-        intro = f"Тест Голланда (RIASEC) запущен.\nВопросов: {len(qs)}."
+        intro = f"«{LABEL_OPG}» запущен.\nВопросов: {len(qs)}."
     else:
-        intro = f"Тест Йовайши (модификация Резапкиной) запущен.\nВопросов: {len(qs)}."
+        intro = f"«{LABEL_PROF_TABLE}» запущен.\nВопросов: {len(qs)}."
     send_message(vk, user_id, f"{intro}\n\n{render_question(test_id, 0)}", keyboard=keyboard_for_test(test_id))
 
 
 def send_welcome(vk, user_id: int):
     send_message(vk, user_id, WELCOME_TEXT, keyboard=build_menu_keyboard())
+
+
+def send_stub_notice(vk, user_id: int, label: str):
+    send_message(
+        vk,
+        user_id,
+        f"Методика «{label}» пока в разработке. Выбери другой тест в меню.",
+        keyboard=build_menu_keyboard(),
+    )
 
 
 def _option_weights(option_val):
@@ -679,21 +720,45 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("ддо",):
         start_test(vk, user_id, TEST_DDO)
         return True
-    if t in ("голланд", "голландия", "holland", "тест голланда"):
+    if t in ("опг", "opg"):
         start_test(vk, user_id, TEST_HOLLAND)
         return True
-    if t in ("йовайши", "йоваши", "jovashi", "иовайши"):
+    if t in ("таблица", "таблица опт", "опт"):
         start_test(vk, user_id, TEST_JOVASHI)
+        return True
+    if t in ("кеттелл", "kettell", "cattell"):
+        send_stub_notice(vk, user_id, LABEL_KETTELL)
+        return True
+    if t in ("равен", "raven"):
+        send_stub_notice(vk, user_id, LABEL_RAVEN)
+        return True
+    if t.replace(" ", "") in ("эн-60", "эн60", "en-60", "en60"):
+        send_stub_notice(vk, user_id, LABEL_EN60)
+        return True
+    if t.replace(" ", "") in ("эн-57", "эн57", "en-57", "en57"):
+        send_stub_notice(vk, user_id, LABEL_EN57)
         return True
     # Подписи с клавиатуры (с заглавной)
     if stripped == "ДДО":
         start_test(vk, user_id, TEST_DDO)
         return True
-    if stripped == "Голланд":
+    if stripped == KB_OPG:
         start_test(vk, user_id, TEST_HOLLAND)
         return True
-    if stripped in ("Йовайши", "Йоваши"):
+    if stripped == KB_PROF_TABLE:
         start_test(vk, user_id, TEST_JOVASHI)
+        return True
+    if stripped == KB_KETTELL:
+        send_stub_notice(vk, user_id, LABEL_KETTELL)
+        return True
+    if stripped == KB_RAVEN:
+        send_stub_notice(vk, user_id, LABEL_RAVEN)
+        return True
+    if stripped == KB_EN60:
+        send_stub_notice(vk, user_id, LABEL_EN60)
+        return True
+    if stripped == KB_EN57:
+        send_stub_notice(vk, user_id, LABEL_EN57)
         return True
     return False
 
