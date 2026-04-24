@@ -24,7 +24,12 @@ if _GROUP_ID_RAW:
 # SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
 _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
 DB_PATH = (os.environ.get("SQLITE_PATH") or os.environ.get("DB_PATH") or _DB_DEFAULT).strip() or _DB_DEFAULT
+OPG_PATH = os.path.join(_BASE, "opg_questions.json")
 JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
+KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
+RAVEN_PATH = os.path.join(_BASE, "raven_questions.json")
+EN60_PATH = os.path.join(_BASE, "en60_questions.json")
+EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 
 REMINDER_CHECK_EVERY_SEC = 60
 REMINDER_AFTER_INACTIVE_MIN = 20
@@ -42,12 +47,17 @@ _LONGPOLL_TRANSIENT = (
 )
 
 TEST_DDO = "ddo"
-# Внутренние id сохранены для совместимости с уже сохранёнными сессиями в БД
-TEST_HOLLAND = "holland"
+TEST_OPG = "opg"
 TEST_JOVASHI = "jovashi"
+TEST_KETTELL = "kettell"
+TEST_RAVEN = "raven"
+TEST_EN60 = "en60"
+TEST_EN57 = "en57"
+LEGACY_HOLLAND = "holland"
+
 LABEL_OPG = "ОПГ (опросник прогресс. готовности)"
 LABEL_PROF_TABLE = (
-    "Таблица для ориентиаровочн. определ. предпочтительности типа будущей профессии"
+    "Таблица для ориентировочного определения предпочтительности типа будущей профессии"
 )
 LABEL_KETTELL = "Кеттелл"
 LABEL_RAVEN = "Равен"
@@ -61,14 +71,6 @@ KB_KETTELL = "Кеттелл"
 KB_RAVEN = "Равен"
 KB_EN60 = "ЭН - 60"
 KB_EN57 = "ЭН - 57"
-
-STUB_TESTS = frozenset({TEST_KETTELL, TEST_RAVEN, TEST_EN60, TEST_EN57})
-STUB_LABELS = {
-    TEST_KETTELL: LABEL_KETTELL,
-    TEST_RAVEN: LABEL_RAVEN,
-    TEST_EN60: LABEL_EN60,
-    TEST_EN57: LABEL_EN57,
-}
 
 # --- ДДО (Е.А. Климов) ---
 PROFESSION_TYPES = {
@@ -230,55 +232,50 @@ CAREER_HINTS_DDO = {
     "Ч-Х": "🎨 Человек-Художественный образ\n\nТебе подходят творческие профессии: дизайнер, художник, музыкант, актер, писатель, архитектор.\n\nРекомендация: развивай творческие способности, изучай искусство.",
 }
 
-# --- ОПГ: тот же блок вопросов, что ранее (RIASEC «одно из двух») ---
-HOLLAND_TYPES = {
-    "R": "Реалистический (практический) тип",
-    "I": "Исследовательский тип",
-    "A": "Артистический тип",
-    "S": "Социальный тип",
-    "E": "Предпринимающий тип",
-    "C": "Конвенциональный (офисно-деловой) тип",
+def _load_questions(path: str):
+    with open(path, encoding="utf-8") as _f:
+        return json.load(_f)
+
+
+# --- ОПГ (опросник прогрессивной готовности): 24 вопроса, 4 варианта ---
+OPG_DIMENSIONS = {
+    "ПОЗ": "Познавательная готовность (знания о профессиях)",
+    "ЭМО": "Эмоциональная готовность (переживания, мотивация)",
+    "ДЕЯ": "Деятельностная готовность (действия, план, практика)",
+    "КОМ": "Коммуникативная готовность (разговоры, поддержка)",
 }
 
-QUESTIONS_HOLLAND = [
-    {"q": "1. Что ближе?", "options": {"1": ("Ремонтировать технику, работать руками", {"R": 1}), "2": ("Вести финансовую отчётность по шаблону", {"C": 1})}},
-    {"q": "2. Что ближе?", "options": {"1": ("Разбираться в причинах явлений, ставить опыты", {"I": 1}), "2": ("Обучать и поддерживать людей", {"S": 1})}},
-    {"q": "3. Что ближе?", "options": {"1": ("Рисовать, писать, выступать", {"A": 1}), "2": ("Продвигать идею, вести переговоры", {"E": 1})}},
-    {"q": "4. Что ближе?", "options": {"1": ("Собирать узлы по инструкции", {"R": 1}), "2": ("Искать закономерности в данных", {"I": 1})}},
-    {"q": "5. Что ближе?", "options": {"1": ("Оформлять документы, следовать регламенту", {"C": 1}), "2": ("Организовывать людей и ресурсы под цель", {"E": 1})}},
-    {"q": "6. Что ближе?", "options": {"1": ("Помогать людям в трудной ситуации", {"S": 1}), "2": ("Создавать эстетический образ, дизайн", {"A": 1})}},
-    {"q": "7. Что ближе?", "options": {"1": ("Работать на производстве, с инструментом", {"R": 1}), "2": ("Консультировать по выбору профессии или здоровья", {"S": 1})}},
-    {"q": "8. Что ближе?", "options": {"1": ("Анализировать тексты, таблицы, модели", {"I": 1}), "2": ("Вести проекты и договариваться с партнёрами", {"E": 1})}},
-    {"q": "9. Что ближе?", "options": {"1": ("Планировать бюджет и сроки по чек-листам", {"C": 1}), "2": ("Импровизировать в творческой задаче", {"A": 1})}},
-    {"q": "10. Что ближе?", "options": {"1": ("Настраивать оборудование, машины", {"R": 1}), "2": ("Писать код или научные заметки", {"I": 1})}},
-    {"q": "11. Что ближе?", "options": {"1": ("Работать в команде над социальным проектом", {"S": 1}), "2": ("Запускать инициативы, искать клиентов", {"E": 1})}},
-    {"q": "12. Что ближе?", "options": {"1": ("Систематизировать архивы и базы", {"C": 1}), "2": ("Монтировать, строить, возиться с механизмом", {"R": 1})}},
-    {"q": "13. Что ближе?", "options": {"1": ("Исследовать, читать специальную литературу", {"I": 1}), "2": ("Учить или тренировать группу", {"S": 1})}},
-    {"q": "14. Что ближе?", "options": {"1": ("Выступать, презентовать идею публике", {"A": 1}), "2": ("Следить за точностью цифр и форм", {"C": 1})}},
-    {"q": "15. Что ближе?", "options": {"1": ("Работать в поле, мастерской, на объекте", {"R": 1}), "2": ("Предпринимать: риск, конкуренция, сделки", {"E": 1})}},
-    {"q": "16. Что ближе?", "options": {"1": ("Решать логические и аналитические задачи", {"I": 1}), "2": ("Заботиться о благополучии других", {"S": 1})}},
-    {"q": "17. Что ближе?", "options": {"1": ("Делать красивые вещи или перформансы", {"A": 1}), "2": ("Соблюдать стандарты и процедуры", {"C": 1})}},
-    {"q": "18. Что ближе?", "options": {"1": ("Управлять командой и отвечать за результат", {"E": 1}), "2": ("Копать глубже в теме «как это устроено»", {"I": 1})}},
-    {"q": "19. Что ближе?", "options": {"1": ("Работать с живыми материалами и инструментом", {"R": 1}), "2": ("Общаться и мотивировать людей", {"S": 1})}},
-    {"q": "20. Что ближе?", "options": {"1": ("Продавать, убеждать, вести переговоры", {"E": 1}), "2": ("Оформлять отчёты, вести учёт", {"C": 1})}},
-    {"q": "21. Что ближе?", "options": {"1": ("Свободное творческое выражение", {"A": 1}), "2": ("Строгая проверка фактов и гипотез", {"I": 1})}},
-    {"q": "22. Что ближе?", "options": {"1": ("Практические задачи «сделай руками»", {"R": 1}), "2": ("Эмпатия и поддержка в общении", {"S": 1})}},
-    {"q": "23. Что ближе?", "options": {"1": ("Лидерство и ответственность за прибыль/проект", {"E": 1}), "2": ("Работа по регламенту и шаблонам", {"C": 1})}},
-    {"q": "24. Что ближе?", "options": {"1": ("Эксперименты, лаборатория, наука", {"I": 1}), "2": ("Театр, музыка, визуальное искусство", {"A": 1})}},
-]
+QUESTIONS_OPG = _load_questions(OPG_PATH)
 
-CAREER_HINTS_HOLLAND = {
-    "R": "🔩 Реалистический тип — практика, техника, мастерство. Инженер, механик, технолог, повар, военный специалист.",
-    "I": "🔬 Исследовательский тип — анализ, наука, глубина. Учёный, врач-диагност, программист-алгоритмист, аналитик.",
-    "A": "🎭 Артистический тип — творчество, свобода формы. Дизайнер, художник, журналист, актёр, маркетинг-креатив.",
-    "S": "🤝 Социальный тип — люди, забота, обучение. Учитель, психолог, HR, социальный работник, врач.",
-    "E": "📈 Предпринимающий тип — влияние, цели, бизнес. Менеджер, предприниматель, продажи, продюсер.",
-    "C": "📋 Конвенциональный тип — порядок, данные, правила. Бухгалтер, экономист, делопроизводитель, логистика.",
+CAREER_HINTS_OPG = {
+    "ПОЗ": "📚 Познавательная готовность — собирай факты: профессии, требования, вузы, рынок труда; консультируйся с педагогом.",
+    "ЭМО": "💚 Эмоциональная готовность — нормализуй тревогу, опирайся на ценности; при сильном стрессе обратись к школьному психологу.",
+    "ДЕЯ": "🎯 Деятельностная готовность — малые шаги: профориентация, проекты, практика; фиксируй цели на неделю/месяц.",
+    "КОМ": "🤝 Коммуникативная готовность — обсуждай планы с близкими и специалистами; учись формулировать запросы о помощи.",
 }
 
 # --- Таблица ОПТ: вопросы из JSON (модификация Резапкиной) ---
-with open(JOVASHI_PATH, encoding="utf-8") as _f:
-    QUESTIONS_JOVASHI = json.load(_f)
+QUESTIONS_JOVASHI = _load_questions(JOVASHI_PATH)
+
+QUESTIONS_KETTELL = _load_questions(KETTELL_PATH)
+KETTELL_TRAITS = {
+    "ПР": "Прагматичность / ориентация на факты и порядок",
+    "ЭМ": "Эмоциональная чувствительность",
+    "КО": "Самоконтроль и выдержка",
+    "ОБ": "Общительность и контактность",
+}
+CAREER_HINTS_KETTELL = {
+    "ПР": "📐 Прагматичность — сильные стороны в анализе, планировании, точных задачах. Подумай об инженерии, IT, экономике, управлении качеством.",
+    "ЭМ": "💭 Эмоциональная чувствительность — важны поддержка, ритм отдыха и ясные рамки. Подойдут гуманитарные и творческие направления, психология, медицина (с учётом нагрузки).",
+    "КО": "⚖️ Самоконтроль — плюс для дисциплинированных профессий: юриспруденция, медицина, авиация, финансы.",
+    "ОБ": "🗣 Общительность — продажи, обучение, HR, журналистика, event-менеджмент.",
+}
+
+QUESTIONS_RAVEN = _load_questions(RAVEN_PATH)
+
+QUESTIONS_EN60 = _load_questions(EN60_PATH)
+QUESTIONS_EN57 = _load_questions(EN57_PATH)
+EN_LABELS = {"E": "Экстраверсия", "N": "Нейротизм / эмоциональная лабильность"}
 
 JOVASHI_SPHERES = {
     "ЛЮДИ": "Сфера работы с людьми",
@@ -302,35 +299,63 @@ WELCOME_TEXT = (
     "Привет! Это бот для прохождения профориентации.\n\n"
     "Доступные методики:\n"
     "• ДДО — дифференциально-диагностический опросник Е.А. Климова (20 вопросов, выбор из двух занятий).\n"
-    f"• {LABEL_OPG} — 24 вопроса, выбор из двух вариантов.\n"
+    f"• {LABEL_OPG} — 24 вопроса, четыре варианта ответа.\n"
     f"• {LABEL_PROF_TABLE} — 24 вопроса, три варианта ответа.\n"
-    f"• {LABEL_KETTELL}, {LABEL_RAVEN}, {LABEL_EN60}, {LABEL_EN57} — скоро.\n\n"
+    f"• {LABEL_KETTELL} — 18 вопросов, три варианта (упрощённый срез черт личности).\n"
+    f"• {LABEL_RAVEN} — 12 задач на логику и сообразительность (учебный аналог, не оригинальные таблицы).\n"
+    f"• {LABEL_EN60} — 30 утверждений «да/нет» (ориентир по экстраверсии и нейротизму).\n"
+    f"• {LABEL_EN57} — 24 утверждения «да/нет» (тот же формат, короче).\n\n"
     "Команды (можно писать в чат):\n"
     "— ддо — начать ДДО;\n"
     "— опг — начать ОПГ;\n"
     "— таблица — начать таблицу для ориентировочного определения предпочтительности типа будущей профессии;\n"
+    "— кеттелл, равен, эн-60, эн-57 — соответствующие опросники;\n"
     "— привет, старт или меню — это сообщение и кнопки.\n\n"
     "Отвечай на вопросы кнопками под сообщением. Удачи!"
 )
 
 
+def normalize_test_id(test_id: str | None) -> str:
+    if not test_id:
+        return TEST_DDO
+    if test_id == LEGACY_HOLLAND:
+        return TEST_OPG
+    return test_id
+
+
 def questions_for(test_id: str):
-    if test_id == TEST_DDO:
+    tid = normalize_test_id(test_id)
+    if tid == TEST_DDO:
         return QUESTIONS_DDO
-    if test_id == TEST_HOLLAND:
-        return QUESTIONS_HOLLAND
-    if test_id == TEST_JOVASHI:
+    if tid == TEST_OPG:
+        return QUESTIONS_OPG
+    if tid == TEST_JOVASHI:
         return QUESTIONS_JOVASHI
+    if tid == TEST_KETTELL:
+        return QUESTIONS_KETTELL
+    if tid == TEST_RAVEN:
+        return QUESTIONS_RAVEN
+    if tid == TEST_EN60:
+        return QUESTIONS_EN60
+    if tid == TEST_EN57:
+        return QUESTIONS_EN57
     return QUESTIONS_DDO
 
 
 def empty_scores(test_id: str) -> dict:
-    if test_id == TEST_DDO:
+    tid = normalize_test_id(test_id)
+    if tid == TEST_DDO:
         return {k: 0 for k in PROFESSION_TYPES}
-    if test_id == TEST_HOLLAND:
-        return {k: 0 for k in HOLLAND_TYPES}
-    if test_id == TEST_JOVASHI:
+    if tid == TEST_OPG:
+        return {k: 0 for k in OPG_DIMENSIONS}
+    if tid == TEST_JOVASHI:
         return {k: 0 for k in JOVASHI_SPHERES}
+    if tid == TEST_KETTELL:
+        return {k: 0 for k in KETTELL_TRAITS}
+    if tid == TEST_RAVEN:
+        return {"LOGIC": 0}
+    if tid in (TEST_EN60, TEST_EN57):
+        return {k: 0 for k in EN_LABELS}
     return {}
 
 
@@ -379,6 +404,10 @@ def init_db():
         _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
+        cur.execute(
+            "UPDATE user_progress SET test_id=? WHERE test_id=?",
+            (TEST_OPG, LEGACY_HOLLAND),
+        )
         conn.commit()
 
 
@@ -442,7 +471,12 @@ def get_progress(user_id: int):
             return None
         step, scores_json, status, test_id = row
         scores = json.loads(scores_json)
-        return {"step": step, "scores": scores, "status": status, "test_id": test_id or TEST_DDO}
+        tid = normalize_test_id(test_id or TEST_DDO)
+        if tid == TEST_OPG and scores and not set(scores.keys()) <= set(OPG_DIMENSIONS):
+            scores = empty_scores(TEST_OPG)
+            step = 0
+            save_progress(user_id=user_id, test_id=TEST_OPG, step=step, scores=scores, status=status)
+        return {"step": step, "scores": scores, "status": status, "test_id": tid}
 
 
 def complete_progress(user_id: int):
@@ -520,6 +554,15 @@ def build_answer_keyboard_jovashi():
     return kb.get_keyboard()
 
 
+def build_answer_keyboard_quad():
+    kb = VkKeyboard(one_time=False, inline=True)
+    kb.add_button("1", color=VkKeyboardColor.PRIMARY)
+    kb.add_button("2", color=VkKeyboardColor.PRIMARY)
+    kb.add_button("3", color=VkKeyboardColor.PRIMARY)
+    kb.add_button("4", color=VkKeyboardColor.PRIMARY)
+    return kb.get_keyboard()
+
+
 def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
     kb.add_button("ДДО", color=VkKeyboardColor.POSITIVE)
@@ -537,8 +580,13 @@ def build_menu_keyboard():
     return kb.get_keyboard()
 
 
-def keyboard_for_test(test_id: str):
-    if test_id == TEST_JOVASHI:
+def keyboard_for_test(test_id: str, step: int = 0):
+    tid = normalize_test_id(test_id)
+    qs = questions_for(tid)
+    nopts = len(qs[step]["options"]) if step < len(qs) else 2
+    if nopts >= 4:
+        return build_answer_keyboard_quad()
+    if nopts == 3:
         return build_answer_keyboard_jovashi()
     return build_answer_keyboard_binary()
 
@@ -548,13 +596,17 @@ def send_message(vk, user_id, message, keyboard=None):
 
 
 def render_question(test_id: str, step: int) -> str:
-    item = questions_for(test_id)[step]
+    tid = normalize_test_id(test_id)
+    item = questions_for(tid)[step]
     lines = [item["q"]]
-    for key in sorted(item["options"].keys(), key=lambda x: int(x)):
+    keys = sorted(item["options"].keys(), key=lambda x: int(x))
+    for key in keys:
         opt = item["options"][key]
         label = opt[0] if isinstance(opt[0], str) else str(opt[0])
         lines.append(f"{key}) {label}")
-    if test_id == TEST_JOVASHI:
+    if len(keys) == 4:
+        lines.append("\nВыбери ответ кнопкой 1, 2, 3 или 4.")
+    elif len(keys) == 3:
         lines.append("\nВыбери ответ кнопкой 1, 2 или 3.")
     else:
         lines.append("\nВыбери ответ кнопкой 1 или 2.")
@@ -571,7 +623,21 @@ def _interpret_jovashi(score: int) -> str:
     return "практически не выражена"
 
 
+def _label_for_test(test_id: str) -> str:
+    tid = normalize_test_id(test_id)
+    return {
+        TEST_DDO: "ДДО (Климов)",
+        TEST_OPG: LABEL_OPG,
+        TEST_JOVASHI: LABEL_PROF_TABLE,
+        TEST_KETTELL: LABEL_KETTELL,
+        TEST_RAVEN: LABEL_RAVEN,
+        TEST_EN60: LABEL_EN60,
+        TEST_EN57: LABEL_EN57,
+    }.get(tid, "тест")
+
+
 def finish_test(vk, user_id: int, test_id: str, scores: dict):
+    tid = normalize_test_id(test_id)
     sorted_types = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     if not sorted_types:
         send_message(
@@ -584,57 +650,82 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     top3 = sorted_types[:3]
     best_key = top3[0][0]
 
-    if test_id == TEST_DDO:
+    if tid == TEST_DDO:
         title = "📊 Твой результат по тесту ДДО (топ-3):"
         lines = [title]
         for i, (ptype, points) in enumerate(top3, 1):
             lines.append(f"{i}. {PROFESSION_TYPES[ptype]} — {points} баллов")
         lines.append(f"\n{CAREER_HINTS_DDO.get(best_key, 'Выбирай направление, которое откликается сильнее.')}")
         lines.append("\nХочешь пройти снова — выбери тест кнопкой или командой.")
-    elif test_id == TEST_HOLLAND:
+    elif tid == TEST_OPG:
         lines = [f"📊 Твой результат по «{LABEL_OPG}» (топ-3):"]
         for i, (code, points) in enumerate(top3, 1):
-            lines.append(f"{i}. {HOLLAND_TYPES[code]} — {points} баллов")
-        lines.append(f"\n{CAREER_HINTS_HOLLAND.get(best_key, '')}")
-        lines.append("\nКод RIASEC по убыванию: " + "".join(k for k, _ in sorted_types[:3] if _ > 0) + ".")
-        lines.append("\nМожно пройти другой тест — открой «Меню» или нажми кнопку.")
-    else:
+            lines.append(f"{i}. {OPG_DIMENSIONS[code]} — {points} баллов")
+        lines.append(f"\n{CAREER_HINTS_OPG.get(best_key, '')}")
+        lines.append("\nРазвивай все четыре стороны готовности — они поддерживают друг друга.")
+    elif tid == TEST_JOVASHI:
         lines = [f"📊 Твой результат по «{LABEL_PROF_TABLE}» (топ-3 сферы):"]
         for i, (key, points) in enumerate(top3, 1):
             interp = _interpret_jovashi(points)
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
         lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
         lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
+    elif tid == TEST_KETTELL:
+        lines = [f"📊 Твой результат по «{LABEL_KETTELL}» (топ-3 черты):"]
+        for i, (key, points) in enumerate(top3, 1):
+            lines.append(f"{i}. {KETTELL_TRAITS[key]} — {points} баллов")
+        lines.append(f"\n{CAREER_HINTS_KETTELL.get(best_key, '')}")
+        lines.append("\nЭто упрощённый учебный срез, не замена полноценной методики Кеттелла.")
+    elif tid == TEST_RAVEN:
+        total = len(QUESTIONS_RAVEN)
+        correct = scores.get("LOGIC", 0)
+        pct = round(100 * correct / total) if total else 0
+        lines = [
+            f"📊 Результат «{LABEL_RAVEN}»: {correct} из {total} верных ({pct}%).",
+            "",
+            "Задачи учебные (аналог по формату), без оригинальных таблиц Равена. "
+            "Используй как тренировку внимательности и логики.",
+        ]
+        if pct >= 75:
+            lines.append("\nСильный результат — продолжай решать подобные задачи и разбирать ошибки.")
+        elif pct >= 50:
+            lines.append("\nСредний уровень — полезно тренировать ряды, условия и аккуратность в подсчётах.")
+        else:
+            lines.append("\nЕсть куда расти — разбирай каждую задачу и ищи закономерность.")
+    elif tid in (TEST_EN60, TEST_EN57):
+        e = scores.get("E", 0)
+        n = scores.get("N", 0)
+        max_e = (len(QUESTIONS_EN60) + 1) // 2 if tid == TEST_EN60 else (len(QUESTIONS_EN57) + 1) // 2
+        max_n = len(QUESTIONS_EN60) // 2 if tid == TEST_EN60 else len(QUESTIONS_EN57) // 2
+        label = LABEL_EN60 if tid == TEST_EN60 else LABEL_EN57
+        lines = [
+            f"📊 Результат «{label}» (ориентир, не клиническая диагностика):",
+            f"• {EN_LABELS['E']}: {e} из {max_e} по ответам «да» к соответствующим пунктам.",
+            f"• {EN_LABELS['N']}: {n} из {max_n} по ответам «да» к соответствующим пунктам.",
+            "",
+            "Больше «да» по экстраверсии — склонность к активности и контактам; "
+            "больше «да» по нейротизму — сильнее реакция на стресс и переживания. "
+            "Обсуди сомнения со специалистом.",
+        ]
+    else:
+        lines = ["Результат сохранён. Открой меню и выбери другой тест."]
 
     send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
     complete_progress(user_id)
-    save_result(user_id, test_id, scores, top3)
+    save_result(user_id, tid, scores, top3)
 
 
 def start_test(vk, user_id: int, test_id: str):
-    qs = questions_for(test_id)
-    scores = empty_scores(test_id)
-    save_progress(user_id=user_id, test_id=test_id, step=0, scores=scores, status="in_progress")
-    if test_id == TEST_DDO:
-        intro = f"Тест ДДО (Климов) запущен.\nВопросов: {len(qs)}."
-    elif test_id == TEST_HOLLAND:
-        intro = f"«{LABEL_OPG}» запущен.\nВопросов: {len(qs)}."
-    else:
-        intro = f"«{LABEL_PROF_TABLE}» запущен.\nВопросов: {len(qs)}."
-    send_message(vk, user_id, f"{intro}\n\n{render_question(test_id, 0)}", keyboard=keyboard_for_test(test_id))
+    tid = normalize_test_id(test_id)
+    qs = questions_for(tid)
+    scores = empty_scores(tid)
+    save_progress(user_id=user_id, test_id=tid, step=0, scores=scores, status="in_progress")
+    intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {len(qs)}."
+    send_message(vk, user_id, f"{intro}\n\n{render_question(tid, 0)}", keyboard=keyboard_for_test(tid, 0))
 
 
 def send_welcome(vk, user_id: int):
     send_message(vk, user_id, WELCOME_TEXT, keyboard=build_menu_keyboard())
-
-
-def send_stub_notice(vk, user_id: int, label: str):
-    send_message(
-        vk,
-        user_id,
-        f"Методика «{label}» пока в разработке. Выбери другой тест в меню.",
-        keyboard=build_menu_keyboard(),
-    )
 
 
 def _option_weights(option_val):
@@ -655,28 +746,34 @@ def handle_answer(vk, user_id: int, text: str):
         )
         return
     test_id = progress["test_id"]
+    tid = normalize_test_id(test_id)
     touch_progress(user_id)
-    valid = {"1", "2"} if test_id != TEST_JOVASHI else {"1", "2", "3"}
-    if text not in valid:
-        send_message(vk, user_id, f"Пожалуйста, используй кнопки {' / '.join(sorted(valid))}.", keyboard=keyboard_for_test(test_id))
-        send_message(vk, user_id, render_question(test_id, progress["step"]), keyboard=keyboard_for_test(test_id))
-        return
     step = progress["step"]
-    scores = progress["scores"]
-    qs = questions_for(test_id)
+    qs = questions_for(tid)
     if step >= len(qs):
-        finish_test(vk, user_id, test_id, scores)
+        finish_test(vk, user_id, tid, progress["scores"])
         return
+    valid = set(qs[step]["options"].keys())
+    if text not in valid:
+        send_message(
+            vk,
+            user_id,
+            f"Пожалуйста, используй кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
+            keyboard=keyboard_for_test(tid, step),
+        )
+        send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
+        return
+    scores = progress["scores"]
     weights = _option_weights(qs[step]["options"][text])
     for ptype, value in weights.items():
         scores[ptype] = scores.get(ptype, 0) + value
     step += 1
     if step < len(qs):
-        save_progress(user_id=user_id, test_id=test_id, step=step, scores=scores, status="in_progress")
-        send_message(vk, user_id, render_question(test_id, step), keyboard=keyboard_for_test(test_id))
+        save_progress(user_id=user_id, test_id=tid, step=step, scores=scores, status="in_progress")
+        send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
     else:
-        save_progress(user_id=user_id, test_id=test_id, step=step, scores=scores, status="completed")
-        finish_test(vk, user_id, test_id, scores)
+        save_progress(user_id=user_id, test_id=tid, step=step, scores=scores, status="completed")
+        finish_test(vk, user_id, tid, scores)
 
 
 def reminder_worker():
@@ -689,13 +786,16 @@ def reminder_worker():
                 if not progress or progress["status"] != "in_progress":
                     continue
                 test_id = progress["test_id"]
-                total = len(questions_for(test_id))
+                tid = normalize_test_id(test_id)
+                qs = questions_for(tid)
+                total = len(qs)
                 step_display = progress["step"] + 1
+                st = progress["step"]
                 send_message(
                     vk,
                     uid,
                     f"⏰ Напоминание: ты на вопросе {step_display} из {total}.\nПродолжим? Выбери ответ кнопками.",
-                    keyboard=keyboard_for_test(test_id),
+                    keyboard=keyboard_for_test(tid, st if st < len(qs) else 0),
                 )
                 set_reminded(uid)
         except Exception as e:
@@ -721,44 +821,56 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         start_test(vk, user_id, TEST_DDO)
         return True
     if t in ("опг", "opg"):
-        start_test(vk, user_id, TEST_HOLLAND)
+        start_test(vk, user_id, TEST_OPG)
+        return True
+    if t in ("голланд", "голландия", "holland", "тест голланда"):
+        start_test(vk, user_id, TEST_OPG)
         return True
     if t in ("таблица", "таблица опт", "опт"):
         start_test(vk, user_id, TEST_JOVASHI)
         return True
+    if t in ("йовайши", "йоваши", "jovashi", "иовайши"):
+        start_test(vk, user_id, TEST_JOVASHI)
+        return True
     if t in ("кеттелл", "kettell", "cattell"):
-        send_stub_notice(vk, user_id, LABEL_KETTELL)
+        start_test(vk, user_id, TEST_KETTELL)
         return True
     if t in ("равен", "raven"):
-        send_stub_notice(vk, user_id, LABEL_RAVEN)
+        start_test(vk, user_id, TEST_RAVEN)
         return True
     if t.replace(" ", "") in ("эн-60", "эн60", "en-60", "en60"):
-        send_stub_notice(vk, user_id, LABEL_EN60)
+        start_test(vk, user_id, TEST_EN60)
         return True
     if t.replace(" ", "") in ("эн-57", "эн57", "en-57", "en57"):
-        send_stub_notice(vk, user_id, LABEL_EN57)
+        start_test(vk, user_id, TEST_EN57)
         return True
     # Подписи с клавиатуры (с заглавной)
     if stripped == "ДДО":
         start_test(vk, user_id, TEST_DDO)
         return True
     if stripped == KB_OPG:
-        start_test(vk, user_id, TEST_HOLLAND)
+        start_test(vk, user_id, TEST_OPG)
+        return True
+    if stripped in ("Голланд",):
+        start_test(vk, user_id, TEST_OPG)
         return True
     if stripped == KB_PROF_TABLE:
         start_test(vk, user_id, TEST_JOVASHI)
         return True
+    if stripped in ("Йовайши", "Йоваши"):
+        start_test(vk, user_id, TEST_JOVASHI)
+        return True
     if stripped == KB_KETTELL:
-        send_stub_notice(vk, user_id, LABEL_KETTELL)
+        start_test(vk, user_id, TEST_KETTELL)
         return True
     if stripped == KB_RAVEN:
-        send_stub_notice(vk, user_id, LABEL_RAVEN)
+        start_test(vk, user_id, TEST_RAVEN)
         return True
     if stripped == KB_EN60:
-        send_stub_notice(vk, user_id, LABEL_EN60)
+        start_test(vk, user_id, TEST_EN60)
         return True
     if stripped == KB_EN57:
-        send_stub_notice(vk, user_id, LABEL_EN57)
+        start_test(vk, user_id, TEST_EN57)
         return True
     return False
 
@@ -790,7 +902,7 @@ def main():
                 text_lower = text_stripped.lower()
                 if dispatch_command(vk, user_id, raw):
                     continue
-                if text_lower in ("1", "2", "3"):
+                if text_lower in ("1", "2", "3", "4"):
                     handle_answer(vk, user_id, text_lower)
                 else:
                     send_message(
