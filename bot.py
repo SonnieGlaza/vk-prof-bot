@@ -1357,24 +1357,13 @@ def _deep_collect_strings(obj, out: list[str], depth: int = 0, max_depth: int = 
             _deep_collect_strings(item, out, depth + 1, max_depth)
 
 
-def _event_command_text_candidates(event) -> str:
-    """Объединяет текст из message и коротких строк из сырого object (если клиент положил текст не в message.text)."""
+def _event_command_text_candidates(event, msg: dict) -> str:
+    """Сначала только текст сообщения (кнопки клавиатуры должны совпадать 1:1). Глубокий обход raw — только если text пустой (запас для /stats)."""
+    base = _message_command_text(msg) if msg else ""
+    if _strip_command_text(base):
+        return base
     parts: list[str] = []
     seen: set[str] = set()
-    msg = getattr(event, "message", None)
-    if msg is None and hasattr(event, "obj"):
-        o = event.obj
-        msg = o.get("message") if isinstance(o, dict) else getattr(o, "message", None)
-    if msg is not None:
-        try:
-            md = dict(msg) if not isinstance(msg, dict) else msg
-        except Exception:
-            md = {}
-        if md:
-            t = _message_command_text(md)
-            if t.strip():
-                parts.append(t)
-                seen.add(t.strip())
     try:
         raw_obj = event.raw.get("object") if hasattr(event, "raw") else None
     except Exception:
@@ -1620,9 +1609,7 @@ def main():
                 peer_id = msg.get("peer_id")
                 if peer_id is None:
                     peer_id = user_id
-                raw_cmd = _event_command_text_candidates(event)
-                if not _strip_command_text(raw_cmd):
-                    raw_cmd = _message_command_text(msg)
+                raw_cmd = _event_command_text_candidates(event, msg)
                 if STATS_DEBUG:
                     preview = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
                     preview = preview.replace("\n", "\\n")
