@@ -1218,6 +1218,30 @@ def _normalize_cmd(s: str) -> str:
     return s.strip().lower()
 
 
+def _strip_command_text(s: str) -> str:
+    """Убирает невидимые символы и лишние пробелы (мобильные клиенты / копипаст)."""
+    if not s:
+        return ""
+    for ch in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
+        s = s.replace(ch, "")
+    return " ".join(s.split()).strip()
+
+
+def _is_stats_command(text: str) -> bool:
+    s = _strip_command_text(text)
+    if not s:
+        return False
+    low = s.lower()
+    if low in ("stats", "статистика", "стат"):
+        return True
+    parts = low.split()
+    if not parts:
+        return False
+    first = parts[0]
+    base = first.split("@", 1)[0]
+    return base in ("/stats", "!stats")
+
+
 def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
     """Ответ на напоминание: Да — показать текущий вопрос с цифрами; Нет — сбросить тест и меню."""
     stripped = text.strip()
@@ -1255,9 +1279,9 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
 
 def dispatch_command(vk, user_id: int, text: str) -> bool:
     """Обрабатывает команды меню. Возвращает True, если сообщение обработано."""
-    stripped = text.strip()
-    t = _normalize_cmd(text)
-    if stripped == "/stats" or t == "/stats":
+    stripped = _strip_command_text(text)
+    t = _normalize_cmd(stripped)
+    if _is_stats_command(text):
         return handle_stats_command(vk, user_id)
     if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
         send_welcome(vk, user_id)
@@ -1339,10 +1363,14 @@ def main():
                     continue
                 message = event.obj.message
                 user_id = message["from_id"]
-                raw = message.get("text", "")
-                text_stripped = raw.strip()
+                raw = message.get("text") or ""
+                if isinstance(raw, str):
+                    raw_cmd = raw
+                else:
+                    raw_cmd = str(raw)
+                text_stripped = _strip_command_text(raw_cmd)
                 text_lower = text_stripped.lower()
-                if dispatch_command(vk, user_id, raw):
+                if dispatch_command(vk, user_id, raw_cmd):
                     continue
                 if handle_reminder_continue_choice(vk, user_id, raw):
                     continue
