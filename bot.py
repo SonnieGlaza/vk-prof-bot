@@ -351,7 +351,9 @@ WELCOME_TEXT = (
     "• ЭН - 57 — 24 утверждения «да/нет»; Опросник Айзенка (шкалы E — экстраверсия, N — нейротизм); "
     "формат ориентирован на взрослых.\n\n"
     "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл, равен, "
-    "эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
+    "эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение.\n\n"
+    "Для админа: скачать все ответы в Excel — напиши одно слово «выгрузка» или «/stats». "
+    "Нужно указать твой id ВК в переменной STATS_ADMIN_IDS на сервере бота (Railway)."
 )
 
 
@@ -739,6 +741,13 @@ def is_stats_admin(vk, user_id: int) -> bool:
     return ok
 
 
+def answer_log_row_count() -> int:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM answer_log")
+        return int(cur.fetchone()[0])
+
+
 def _test_title_for_export(test_id: str) -> str:
     return {
         TEST_DDO: "ДДО (Климов)",
@@ -833,6 +842,7 @@ def build_stats_excel_bytes() -> bytes:
 
 
 def send_stats_export(vk, user_id: int):
+    n_rows = answer_log_row_count()
     data = build_stats_excel_bytes()
     fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
@@ -847,10 +857,14 @@ def send_stats_export(vk, user_id: int):
     else:
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
+    note = (
+        f"Excel с ответами участников. Строк с ответами в базе: {n_rows}. "
+        "Если 0 — данные пишутся только с версии бота с логированием; пройдите тест заново после обновления."
+    )
     vk.messages.send(
         peer_id=peer,
         random_id=0,
-        message="Выгрузка ответов участников (все записанные ответы по сессиям).",
+        message=note,
         attachment=att_str,
     )
 
@@ -860,8 +874,10 @@ def handle_stats_command(vk, user_id: int) -> bool:
         send_message(
             vk,
             user_id,
-            "Команда /stats только для администраторов. Если вы админ, добавьте свой числовой VK id "
-            "в переменную STATS_ADMIN_IDS на сервере бота (Railway → Variables), через запятую без пробелов.",
+            "Выгрузка только для администраторов.\n\n"
+            "Сделай так: открой Railway → твой сервис → Variables → добавь STATS_ADMIN_IDS = твой числовой id ВК "
+            "(только цифры, без пробелов). Id смотри в ссылке на страницу vk.com/id… или через настройки. "
+            "Сохрани и Redeploy. Потом напиши боту одно слово: выгрузка",
         )
         return True
     try:
@@ -871,7 +887,7 @@ def handle_stats_command(vk, user_id: int) -> bool:
         send_message(
             vk,
             user_id,
-            f"Не удалось сформировать файл: {e}",
+            f"Не удалось отправить файл. Проверь права токена (сообщения + документы). Ошибка: {e}",
         )
     return True
 
@@ -1355,10 +1371,21 @@ def _line_is_export_alias(line: str) -> bool:
     t = _strip_command_text(line).strip(".,;:!?").lower()
     return t in (
         "выгрузка",
+        "выгрузить",
+        "выгрузить ответы",
+        "выгрузка ответов",
+        "скачать ответы",
+        "скачать таблицу",
+        "таблица ответов",
+        "отчёт",
+        "отчет",
+        "отчёт по ответам",
+        "отчет по ответам",
+        "данные",
+        "список ответов",
         "экспорт",
         "export",
         "скачать",
-        "скачать ответы",
         "статистика",
         "стат",
     )
