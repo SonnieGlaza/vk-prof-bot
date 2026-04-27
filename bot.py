@@ -741,11 +741,58 @@ def is_stats_admin(vk, user_id: int) -> bool:
     return ok
 
 
-def answer_log_row_count() -> int:
+def test_results_row_count() -> int:
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM answer_log")
+        cur.execute("SELECT COUNT(*) FROM test_results")
         return int(cur.fetchone()[0])
+
+
+def _vk_user_link(user_id: int) -> str:
+    return f"https://vk.com/id{user_id}"
+
+
+def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
+    """Краткий текст итогов для Excel (без эмодзи)."""
+    if not scores:
+        return ""
+    lines: list[str] = []
+    if tid == TEST_RAVEN:
+        total = len(QUESTIONS_RAVEN)
+        correct = scores.get("LOGIC", 0)
+        pct = round(100 * correct / total) if total else 0
+        return f"Верных ответов: {correct} из {total} ({pct}%)."
+    if tid in (TEST_EN60, TEST_EN57):
+        e = scores.get("E", 0)
+        n = scores.get("N", 0)
+        max_e = (len(QUESTIONS_EN60) + 1) // 2 if tid == TEST_EN60 else (len(QUESTIONS_EN57) + 1) // 2
+        max_n = len(QUESTIONS_EN60) // 2 if tid == TEST_EN60 else len(QUESTIONS_EN57) // 2
+        return (
+            f"{EN_LABELS['E']}: {e} из {max_e} (да).\n"
+            f"{EN_LABELS['N']}: {n} из {max_n} (да)."
+        )
+    if not top3:
+        return json.dumps(scores, ensure_ascii=False)
+    if tid == TEST_DDO:
+        lines.append("Топ-3 типа Климова:")
+        for i, (ptype, points) in enumerate(top3, 1):
+            lines.append(f"{i}. {PROFESSION_TYPES.get(ptype, ptype)} — {points} б.")
+    elif tid == TEST_OPG:
+        lines.append("Топ-3 по ОПГ:")
+        for i, (code, points) in enumerate(top3, 1):
+            lines.append(f"{i}. {OPG_DIMENSIONS.get(code, code)} — {points} б.")
+    elif tid in (TEST_JOVASHI, TEST_YOVASHI):
+        lines.append("Топ-3 сферы:")
+        for i, (key, points) in enumerate(top3, 1):
+            interp = _interpret_jovashi(points)
+            lines.append(f"{i}. {JOVASHI_SPHERES.get(key, key)} — {points} б. ({interp})")
+    elif tid == TEST_KETTELL:
+        lines.append("Топ-3 черты:")
+        for i, (key, points) in enumerate(top3, 1):
+            lines.append(f"{i}. {KETTELL_TRAITS.get(key, key)} — {points} б.")
+    else:
+        lines.append(json.dumps(scores, ensure_ascii=False))
+    return " ".join(lines) if len(lines) == 1 else "\n".join(lines)
 
 
 def _test_title_for_export(test_id: str) -> str:
@@ -763,86 +810,57 @@ def _test_title_for_export(test_id: str) -> str:
 
 def build_stats_excel_bytes() -> bytes:
     headers = [
-        "session_id",
-        "user_id",
-        "test_id",
-        "test_name",
-        "session_status",
-        "session_started_at",
-        "session_completed_at",
-        "step_index",
-        "answer_key",
-        "question",
-        "answer_text",
-        "weights_json",
-        "answer_recorded_at",
+        "№ (новый пользователь — новый номер)",
+        "Ссылка на пользователя",
+        "Название теста",
+        "Завершил",
+        "Дата и время",
+        "Итоги теста",
     ]
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "answers"
+    ws.title = "results"
     ws.append(headers)
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT
-                a.session_id,
-                a.user_id,
-                a.test_id,
-                a.step_index,
-                a.answer_key,
-                a.question_text,
-                a.answer_label,
-                a.weights_json,
-                a.created_at,
-                s.status,
-                s.started_at,
-                s.completed_at
-            FROM answer_log a
-            JOIN test_sessions s ON s.id = a.session_id
-            ORDER BY a.id
+            SELECT user_id, test_id, finished_at, scores_json, top3_json
+            FROM test_results
+            ORDER BY finished_at ASC, id ASC
             """
         )
-        for row in cur.fetchall():
-            (
-                sid,
-                uid,
-                tid,
-                step_i,
-                akey,
-                qtext,
-                alabel,
-                wjson,
-                created,
-                sess_status,
-                started,
-                completed,
-            ) = row
-            test_name = _test_title_for_export(tid)
-            ws.append(
-                [
-                    sid,
-                    uid,
-                    tid,
-                    test_name,
-                    sess_status,
-                    datetime.utcfromtimestamp(started).strftime("%Y-%m-%d %H:%M:%S") if started else "",
-                    datetime.utcfromtimestamp(completed).strftime("%Y-%m-%d %H:%M:%S") if completed else "",
-                    step_i,
-                    akey,
-                    qtext,
-                    alabel,
-                    wjson,
-                    datetime.utcfromtimestamp(created).strftime("%Y-%m-%d %H:%M:%S") if created else "",
-                ]
-            )
+        db_rows = cur.fetchall()
+    user_serial: dict[int, int] = {}
+    next_serial = 1
+    for uid, tid_raw, finished_at, scores_json, top3_json in db_rows:
+        uid = int(uid)
+        tid = normalize_test_id(tid_raw or TEST_DDO)
+        if uid not in user_serial:
+            user_serial[uid] = next_serial
+            next_serial += 1
+        no = user_serial[uid]
+        link = _vk_user_link(uid)
+        test_name = _test_title_for_export(tid)
+        finished_txt = "Да"
+        try:
+            dt = datetime.utcfromtimestamp(int(finished_at)).strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError, OSError):
+            dt = ""
+        try:
+            scores = json.loads(scores_json) if scores_json else {}
+            top3 = json.loads(top3_json) if top3_json else []
+        except json.JSONDecodeError:
+            scores, top3 = {}, []
+        summary = _export_result_summary(tid, scores, top3)
+        ws.append([no, link, test_name, finished_txt, dt, summary])
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
 def send_stats_export(vk, user_id: int):
-    n_rows = answer_log_row_count()
+    n_rows = test_results_row_count()
     data = build_stats_excel_bytes()
     fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
@@ -858,8 +876,9 @@ def send_stats_export(vk, user_id: int):
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
     note = (
-        f"Excel с ответами участников. Строк с ответами в базе: {n_rows}. "
-        "Если 0 — данные пишутся только с версии бота с логированием; пройдите тест заново после обновления."
+        f"Excel: по одной строке на завершённый тест. Записей в базе: {n_rows}. "
+        "Колонка «№» — порядковый номер пользователя (первое появление vk id в хронологии = новый номер). "
+        "Пошаговые ответы в файл не выгружаются."
     )
     vk.messages.send(
         peer_id=peer,
