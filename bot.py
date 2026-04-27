@@ -40,6 +40,8 @@ for _part in _STATS_ADMIN_IDS_RAW.split(","):
         pass
 
 STATS_DEBUG = (os.environ.get("STATS_DEBUG") or "").strip().lower() in ("1", "true", "yes")
+# Секретная фраза (см. _stats_secret_matches после определения _strip_command_text)
+_STATS_EXPORT_SECRET_RAW = (os.environ.get("STATS_EXPORT_SECRET") or "").strip()
 
 # SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
 _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
@@ -1273,12 +1275,36 @@ def _strip_command_text(s: str) -> str:
     return " ".join(s.split()).strip()
 
 
+def _stats_export_secret_norm() -> str:
+    if not _STATS_EXPORT_SECRET_RAW:
+        return ""
+    return _strip_command_text(_STATS_EXPORT_SECRET_RAW).casefold()
+
+
+def _attachment_text_chunks(att: dict) -> list[str]:
+    out: list[str] = []
+    if not isinstance(att, dict):
+        return out
+    t = att.get("type")
+    if t == "text":
+        inner = att.get("text")
+        if isinstance(inner, dict):
+            for key in ("text", "title", "description"):
+                v = inner.get(key)
+                if isinstance(v, str) and v.strip():
+                    out.append(v)
+    return out
+
+
 def _collect_nested_text(obj, parts: list[str], depth: int = 0):
     if depth > 5 or not isinstance(obj, dict):
         return
     t = obj.get("text")
     if isinstance(t, str) and t.strip():
         parts.append(t)
+    for att in obj.get("attachments") or []:
+        if isinstance(att, dict):
+            parts.extend(_attachment_text_chunks(att))
     rep = obj.get("reply_message")
     if isinstance(rep, dict):
         _collect_nested_text(rep, parts, depth + 1)
@@ -1293,6 +1319,21 @@ def _message_command_text(message: dict) -> str:
     if isinstance(message, dict):
         _collect_nested_text(message, parts, 0)
     return "\n".join(parts) if parts else ""
+
+
+def _stats_secret_matches(text: str) -> bool:
+    sec = _stats_export_secret_norm()
+    if not sec:
+        return False
+    blob = _strip_command_text(text).casefold()
+    if not blob:
+        return False
+    if blob == sec:
+        return True
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if _strip_command_text(line).casefold() == sec:
+            return True
+    return False
 
 
 def _token_is_stats(token: str) -> bool:
@@ -1355,7 +1396,7 @@ def _is_stats_command(text: str) -> bool:
 
 
 def _wants_stats_export(text: str) -> bool:
-    return _is_stats_command(text)
+    return _stats_secret_matches(text) or _is_stats_command(text)
 
 
 def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
@@ -1475,18 +1516,31 @@ def main():
     while True:
         try:
             for event in longpoll.listen():
-                if event.type != VkBotEventType.MESSAGE_NEW:
+                if event.type not in (
+                    VkBotEventType.MESSAGE_NEW,
+                    VkBotEventType.MESSAGE_REPLY,
+                    VkBotEventType.MESSAGE_EDIT,
+                ):
                     continue
                 message = event.obj.message
-                user_id = message["from_id"]
-                peer_id = message.get("peer_id")
+                if not message:
+                    continue
+                msg = dict(message)
+                if msg.get("out") == 1:
+                    continue
+                user_id = msg.get("from_id")
+                if not user_id:
+                    continue
+                peer_id = msg.get("peer_id")
                 if peer_id is None:
                     peer_id = user_id
-                raw_cmd = _message_command_text(dict(message))
-                if STATS_DEBUG and not _strip_command_text(raw_cmd):
+                raw_cmd = _message_command_text(msg)
+                if STATS_DEBUG:
+                    preview = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
+                    preview = preview.replace("\n", "\\n")
                     print(
-                        f"[stats_debug] empty text from_id={user_id} peer={peer_id} "
-                        f"keys={list(dict(message).keys())[:25]}"
+                        f"[stats_debug] type={event.type} from_id={user_id} peer={peer_id} "
+                        f"text_len={len(raw_cmd)} preview={preview!r}"
                     )
                 text_stripped = _strip_command_text(raw_cmd)
                 text_lower = text_stripped.lower()
