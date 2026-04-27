@@ -1337,6 +1337,61 @@ def _message_command_text(message: dict) -> str:
     return "\n".join(parts) if parts else ""
 
 
+def _deep_collect_strings(obj, out: list[str], depth: int = 0, max_depth: int = 12):
+    """Собирает короткие строки из произвольного JSON события (на случай нестандартной вложенности VK)."""
+    if depth > max_depth:
+        return
+    if isinstance(obj, str):
+        s = obj.strip()
+        if 2 <= len(s) <= 200:
+            out.append(s)
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("access_key", "photo_50", "photo_100", "photo_200", "url", "src", "preview"):
+                continue
+            _deep_collect_strings(v, out, depth + 1, max_depth)
+        return
+    if isinstance(obj, list):
+        for item in obj[:50]:
+            _deep_collect_strings(item, out, depth + 1, max_depth)
+
+
+def _event_command_text_candidates(event) -> str:
+    """Объединяет текст из message и коротких строк из сырого object (если клиент положил текст не в message.text)."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    msg = getattr(event, "message", None)
+    if msg is None and hasattr(event, "obj"):
+        o = event.obj
+        msg = o.get("message") if isinstance(o, dict) else getattr(o, "message", None)
+    if msg is not None:
+        try:
+            md = dict(msg) if not isinstance(msg, dict) else msg
+        except Exception:
+            md = {}
+        if md:
+            t = _message_command_text(md)
+            if t.strip():
+                parts.append(t)
+                seen.add(t.strip())
+    try:
+        raw_obj = event.raw.get("object") if hasattr(event, "raw") else None
+    except Exception:
+        raw_obj = None
+    if raw_obj:
+        extra: list[str] = []
+        _deep_collect_strings(raw_obj, extra, 0)
+        for s in extra:
+            if s in seen:
+                continue
+            if len(s) > 80:
+                continue
+            seen.add(s)
+            parts.append(s)
+    return "\n".join(parts) if parts else ""
+
+
 def _stats_secret_matches(text: str) -> bool:
     sec = _stats_export_secret_norm()
     if not sec:
@@ -1539,7 +1594,11 @@ def main():
     vk_session = vk_api.VkApi(token=VK_TOKEN)
     vk = vk_session.get_api()
     longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=LONGPOLL_WAIT_SEC)
-    print(f"Бот запущен: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"Бот запущен: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"group_id={GROUP_ID} | STATS_ADMIN_IDS={len(STATS_ADMIN_IDS)} | "
+        f"secret={'да' if _STATS_EXPORT_SECRET_RAW else 'нет'}"
+    )
     while True:
         try:
             for event in longpoll.listen():
@@ -1561,7 +1620,9 @@ def main():
                 peer_id = msg.get("peer_id")
                 if peer_id is None:
                     peer_id = user_id
-                raw_cmd = _message_command_text(msg)
+                raw_cmd = _event_command_text_candidates(event)
+                if not _strip_command_text(raw_cmd):
+                    raw_cmd = _message_command_text(msg)
                 if STATS_DEBUG:
                     preview = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
                     preview = preview.replace("\n", "\\n")
