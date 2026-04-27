@@ -765,6 +765,30 @@ def _vk_user_link(user_id: int) -> str:
     return f"https://vk.com/id{user_id}"
 
 
+def _fetch_vk_user_names(vk, user_ids: list[int]) -> dict[int, str]:
+    """Имя и фамилия из VK API (батчами). При ошибке или без vk — пустые строки."""
+    out: dict[int, str] = {}
+    if not vk or not user_ids:
+        return out
+    ids = sorted({int(u) for u in user_ids if u})
+    chunk = 900
+    for i in range(0, len(ids), chunk):
+        part = ids[i : i + chunk]
+        try:
+            rows = vk.users.get(user_ids=part)
+        except Exception as e:
+            print(f"[_fetch_vk_user_names] {e}")
+            continue
+        for u in rows or []:
+            uid = u.get("id")
+            if uid is None:
+                continue
+            fn = (u.get("first_name") or "").strip()
+            ln = (u.get("last_name") or "").strip()
+            out[int(uid)] = f"{fn} {ln}".strip()
+    return out
+
+
 def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
     """Краткий текст итогов для Excel (без эмодзи)."""
     if not scores:
@@ -821,10 +845,11 @@ def _test_title_for_export(test_id: str) -> str:
     }.get(test_id, test_id)
 
 
-def build_stats_excel_bytes() -> bytes:
+def build_stats_excel_bytes(vk) -> bytes:
     headers = [
         "№ (новый пользователь — новый номер)",
         "Ссылка на пользователя",
+        "Имя и фамилия (ВК)",
         "Название теста",
         "Завершил",
         "Дата и время",
@@ -868,6 +893,13 @@ def build_stats_excel_bytes() -> bytes:
             )
             answer_counts = {int(sid): int(c) for sid, c in cur.fetchall()}
 
+    all_uids: list[int] = []
+    for row in result_rows:
+        all_uids.append(int(row[1]))
+    for row in session_rows:
+        all_uids.append(int(row[1]))
+    name_by_uid = _fetch_vk_user_names(vk, all_uids)
+
     merged: list[tuple] = []
     for rid, uid, tid_raw, finished_at, scores_json, top3_json in result_rows:
         try:
@@ -897,6 +929,7 @@ def build_stats_excel_bytes() -> bytes:
             next_serial += 1
         no = user_serial[uid]
         link = _vk_user_link(uid)
+        display_name = name_by_uid.get(uid, "")
         test_name = _test_title_for_export(tid)
         if kind == "result":
             finished_txt = "Да"
@@ -942,7 +975,7 @@ def build_stats_excel_bytes() -> bytes:
                 except json.JSONDecodeError:
                     pass
             summary = "\n".join(parts)
-        ws.append([no, link, test_name, finished_txt, dt, summary])
+        ws.append([no, link, display_name, test_name, finished_txt, dt, summary])
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
@@ -951,7 +984,7 @@ def build_stats_excel_bytes() -> bytes:
 def send_stats_export(vk, user_id: int):
     n_done = test_results_row_count()
     n_open = incomplete_sessions_row_count()
-    data = build_stats_excel_bytes()
+    data = build_stats_excel_bytes(vk)
     fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
     bio.name = fname
@@ -967,6 +1000,7 @@ def send_stats_export(vk, user_id: int):
     att_str = f"doc{att['owner_id']}_{att['id']}"
     note = (
         f"Excel: строки = завершённые тесты ({n_done}) + незавершённые сессии ({n_open}). "
+        "Колонка C — имя и фамилия из ВК (если токен не смог получить профиль, ячейка пустая). "
         "Колонка «№» — порядковый номер пользователя (первое появление vk id в общей хронологии строк = новый номер). "
         "Для незавершённых в «Дата» — время старта сессии; в «Итоги» — сколько шагов отвечено. "
         "Пошаговые ответы в файл не выгружаются."
