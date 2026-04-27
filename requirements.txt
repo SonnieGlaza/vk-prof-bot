@@ -1,3 +1,4 @@
 # Long Poll VK-бот (vk_api)
 vk-api>=11.9.9,<13
 requests>=2.31.0,<3
+openpyxl>=3.1.0,<4

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sqlite3
@@ -5,10 +6,12 @@ import threading
 import time
 from datetime import datetime
 
+import openpyxl
 import requests
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from vk_api.upload import VkUpload
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -20,6 +23,18 @@ if _GROUP_ID_RAW:
         GROUP_ID = int(_GROUP_ID_RAW)
     except ValueError:
         GROUP_ID = 0
+GROUP_ID_ABS = abs(GROUP_ID) if GROUP_ID else 0
+# Дополнительные VK user id, кому разрешена /stats (через запятую), если API менеджеров недоступен
+_STATS_ADMIN_IDS_RAW = (os.environ.get("STATS_ADMIN_IDS") or "").strip()
+STATS_ADMIN_IDS: set[int] = set()
+for _part in _STATS_ADMIN_IDS_RAW.split(","):
+    _p = _part.strip()
+    if not _p:
+        continue
+    try:
+        STATS_ADMIN_IDS.add(int(_p))
+    except ValueError:
+        pass
 
 # SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
 _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
@@ -414,8 +429,42 @@ def init_db():
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                test_id TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                status TEXT NOT NULL DEFAULT 'in_progress',
+                final_scores_json TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS answer_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                test_id TEXT NOT NULL,
+                step_index INTEGER NOT NULL,
+                answer_key TEXT NOT NULL,
+                question_text TEXT NOT NULL,
+                answer_label TEXT NOT NULL,
+                weights_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES test_sessions(id)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_session ON answer_log(session_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_user ON answer_log(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON test_sessions(user_id)")
         _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "user_progress", "last_session_id", "INTEGER")
         _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
@@ -436,23 +485,35 @@ def save_progress(
     scores: dict,
     status: str = "in_progress",
     reminder_pending: int = 0,
+    last_session_id: int | None = None,
 ):
     ts = now_ts()
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO user_progress (user_id, step, scores_json, status, started_at, last_activity_at, reminded_at, test_id, reminder_pending)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            INSERT INTO user_progress (user_id, step, scores_json, status, started_at, last_activity_at, reminded_at, test_id, reminder_pending, last_session_id)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
             step=excluded.step,
             scores_json=excluded.scores_json,
             status=excluded.status,
             last_activity_at=excluded.last_activity_at,
             test_id=excluded.test_id,
-            reminder_pending=excluded.reminder_pending
+            reminder_pending=excluded.reminder_pending,
+            last_session_id=COALESCE(excluded.last_session_id, user_progress.last_session_id)
             """,
-            (user_id, step, json.dumps(scores, ensure_ascii=False), status, ts, ts, test_id, reminder_pending),
+            (
+                user_id,
+                step,
+                json.dumps(scores, ensure_ascii=False),
+                status,
+                ts,
+                ts,
+                test_id,
+                reminder_pending,
+                last_session_id,
+            ),
         )
         conn.commit()
 
@@ -492,7 +553,7 @@ def get_progress(user_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT step, scores_json, status, test_id, reminder_pending
+            SELECT step, scores_json, status, test_id, reminder_pending, last_session_id
             FROM user_progress
             WHERE user_id=?
             """,
@@ -501,15 +562,31 @@ def get_progress(user_id: int):
         row = cur.fetchone()
         if not row:
             return None
-        step, scores_json, status, test_id, reminder_pending = row
+        step, scores_json, status, test_id, reminder_pending, last_session_id = row
         scores = json.loads(scores_json)
         tid = normalize_test_id(test_id or TEST_DDO)
         rp = int(reminder_pending or 0)
+        lsid = int(last_session_id) if last_session_id is not None else None
         if tid == TEST_OPG and scores and not set(scores.keys()) <= set(OPG_DIMENSIONS):
             scores = empty_scores(TEST_OPG)
             step = 0
-            save_progress(user_id=user_id, test_id=TEST_OPG, step=step, scores=scores, status=status, reminder_pending=rp)
-        return {"step": step, "scores": scores, "status": status, "test_id": tid, "reminder_pending": rp}
+            save_progress(
+                user_id=user_id,
+                test_id=TEST_OPG,
+                step=step,
+                scores=scores,
+                status=status,
+                reminder_pending=rp,
+                last_session_id=lsid,
+            )
+        return {
+            "step": step,
+            "scores": scores,
+            "status": status,
+            "test_id": tid,
+            "reminder_pending": rp,
+            "last_session_id": lsid,
+        }
 
 
 def complete_progress(user_id: int):
@@ -526,12 +603,247 @@ def complete_progress(user_id: int):
         conn.commit()
 
 
-def abandon_progress(user_id: int):
+def abandon_progress(user_id: int, session_id: int | None = None):
     """Сбрасывает незавершённый тест (например, пользователь отказался продолжать после напоминания)."""
+    ts = now_ts()
     with db_connect() as conn:
         cur = conn.cursor()
+        if session_id:
+            cur.execute(
+                """
+                UPDATE test_sessions
+                SET status='abandoned', completed_at=?
+                WHERE id=? AND user_id=? AND status='in_progress'
+                """,
+                (ts, session_id, user_id),
+            )
         cur.execute("DELETE FROM user_progress WHERE user_id=?", (user_id,))
         conn.commit()
+
+
+def create_test_session(user_id: int, test_id: str) -> int:
+    ts = now_ts()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO test_sessions (user_id, test_id, started_at, status)
+            VALUES (?, ?, ?, 'in_progress')
+            """,
+            (user_id, test_id, ts),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def log_answer_row(
+    session_id: int,
+    user_id: int,
+    test_id: str,
+    step_index: int,
+    answer_key: str,
+    question_text: str,
+    answer_label: str,
+    weights: dict,
+):
+    ts = now_ts()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO answer_log (
+                session_id, user_id, test_id, step_index, answer_key,
+                question_text, answer_label, weights_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                user_id,
+                test_id,
+                step_index,
+                answer_key,
+                question_text,
+                answer_label,
+                json.dumps(weights, ensure_ascii=False),
+                ts,
+            ),
+        )
+        conn.commit()
+
+
+def complete_test_session(session_id: int, user_id: int, scores: dict, status: str = "completed"):
+    ts = now_ts()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE test_sessions
+            SET completed_at=?, status=?, final_scores_json=?
+            WHERE id=? AND user_id=?
+            """,
+            (ts, status, json.dumps(scores, ensure_ascii=False), session_id, user_id),
+        )
+        conn.commit()
+
+
+_STATS_ADMIN_CACHE: dict[int, tuple[float, bool]] = {}
+_STATS_ADMIN_TTL_SEC = 120.0
+
+
+def is_stats_admin(vk, user_id: int) -> bool:
+    if user_id in STATS_ADMIN_IDS:
+        return True
+    if user_id <= 0 or GROUP_ID_ABS <= 0:
+        return False
+    now = time.time()
+    cached = _STATS_ADMIN_CACHE.get(user_id)
+    if cached and now - cached[0] < _STATS_ADMIN_TTL_SEC:
+        return cached[1]
+    ok = False
+    try:
+        data = vk.groups.getMembers(group_id=GROUP_ID_ABS, filter="managers", count=200)
+        ok = user_id in set(data.get("items", []))
+    except Exception as e:
+        print(f"[is_stats_admin] {e}")
+        ok = False
+    _STATS_ADMIN_CACHE[user_id] = (now, ok)
+    return ok
+
+
+def _test_title_for_export(test_id: str) -> str:
+    return {
+        TEST_DDO: "ДДО (Климов)",
+        TEST_OPG: LABEL_OPG,
+        TEST_JOVASHI: LABEL_PROF_TABLE,
+        TEST_YOVASHI: LABEL_YOVASHI,
+        TEST_KETTELL: LABEL_KETTELL,
+        TEST_RAVEN: LABEL_RAVEN,
+        TEST_EN60: LABEL_EN60,
+        TEST_EN57: LABEL_EN57,
+    }.get(test_id, test_id)
+
+
+def build_stats_excel_bytes() -> bytes:
+    headers = [
+        "session_id",
+        "user_id",
+        "test_id",
+        "test_name",
+        "session_status",
+        "session_started_at",
+        "session_completed_at",
+        "step_index",
+        "answer_key",
+        "question",
+        "answer_text",
+        "weights_json",
+        "answer_recorded_at",
+    ]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "answers"
+    ws.append(headers)
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                a.session_id,
+                a.user_id,
+                a.test_id,
+                a.step_index,
+                a.answer_key,
+                a.question_text,
+                a.answer_label,
+                a.weights_json,
+                a.created_at,
+                s.status,
+                s.started_at,
+                s.completed_at
+            FROM answer_log a
+            JOIN test_sessions s ON s.id = a.session_id
+            ORDER BY a.id
+            """
+        )
+        for row in cur.fetchall():
+            (
+                sid,
+                uid,
+                tid,
+                step_i,
+                akey,
+                qtext,
+                alabel,
+                wjson,
+                created,
+                sess_status,
+                started,
+                completed,
+            ) = row
+            test_name = _test_title_for_export(tid)
+            ws.append(
+                [
+                    sid,
+                    uid,
+                    tid,
+                    test_name,
+                    sess_status,
+                    datetime.utcfromtimestamp(started).strftime("%Y-%m-%d %H:%M:%S") if started else "",
+                    datetime.utcfromtimestamp(completed).strftime("%Y-%m-%d %H:%M:%S") if completed else "",
+                    step_i,
+                    akey,
+                    qtext,
+                    alabel,
+                    wjson,
+                    datetime.utcfromtimestamp(created).strftime("%Y-%m-%d %H:%M:%S") if created else "",
+                ]
+            )
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+def send_stats_export(vk, user_id: int):
+    data = build_stats_excel_bytes()
+    fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    bio = io.BytesIO(data)
+    bio.name = fname
+    upload = VkUpload(vk)
+    saved = upload.document_message(bio, title=fname, peer_id=user_id)
+    if isinstance(saved, list) and saved:
+        saved = saved[0]
+    if isinstance(saved, dict) and "doc" in saved:
+        att = saved["doc"]
+    else:
+        att = saved
+    att_str = f"doc{att['owner_id']}_{att['id']}"
+    vk.messages.send(
+        user_id=user_id,
+        random_id=0,
+        message="Выгрузка ответов участников (все записанные ответы по сессиям).",
+        attachment=att_str,
+    )
+
+
+def handle_stats_command(vk, user_id: int) -> bool:
+    if not is_stats_admin(vk, user_id):
+        send_message(
+            vk,
+            user_id,
+            "Команда /stats доступна только администраторам этого сообщества.",
+        )
+        return True
+    try:
+        send_stats_export(vk, user_id)
+    except Exception as e:
+        print(f"[handle_stats_command] {e}")
+        send_message(
+            vk,
+            user_id,
+            f"Не удалось сформировать файл: {e}",
+        )
+    return True
 
 
 def save_result(user_id: int, test_id: str, scores: dict, top3: list):
@@ -689,6 +1001,10 @@ def _label_for_test(test_id: str) -> str:
 
 def finish_test(vk, user_id: int, test_id: str, scores: dict):
     tid = normalize_test_id(test_id)
+    prog = get_progress(user_id)
+    sid = prog.get("last_session_id") if prog else None
+    if sid:
+        complete_test_session(sid, user_id, scores, "completed")
     sorted_types = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     if not sorted_types:
         send_message(
@@ -784,7 +1100,15 @@ def start_test(vk, user_id: int, test_id: str):
     tid = normalize_test_id(test_id)
     qs = questions_for(tid)
     scores = empty_scores(tid)
-    save_progress(user_id=user_id, test_id=tid, step=0, scores=scores, status="in_progress")
+    session_id = create_test_session(user_id, tid)
+    save_progress(
+        user_id=user_id,
+        test_id=tid,
+        step=0,
+        scores=scores,
+        status="in_progress",
+        last_session_id=session_id,
+    )
     intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {len(qs)}."
     send_message(vk, user_id, f"{intro}\n\n{render_question(tid, 0)}", keyboard=keyboard_for_test(tid, 0))
 
@@ -829,15 +1153,35 @@ def handle_answer(vk, user_id: int, text: str):
         send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
         return
     scores = progress["scores"]
-    weights = _option_weights(qs[step]["options"][text])
+    opt_val = qs[step]["options"][text]
+    weights = _option_weights(opt_val)
+    q_text = qs[step]["q"]
+    ans_label = opt_val[0] if isinstance(opt_val[0], str) else str(opt_val[0])
+    sid = progress.get("last_session_id")
+    if sid:
+        log_answer_row(sid, user_id, tid, step, text, q_text, ans_label, weights)
     for ptype, value in weights.items():
         scores[ptype] = scores.get(ptype, 0) + value
     step += 1
     if step < len(qs):
-        save_progress(user_id=user_id, test_id=tid, step=step, scores=scores, status="in_progress")
+        save_progress(
+            user_id=user_id,
+            test_id=tid,
+            step=step,
+            scores=scores,
+            status="in_progress",
+            last_session_id=sid,
+        )
         send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
     else:
-        save_progress(user_id=user_id, test_id=tid, step=step, scores=scores, status="completed")
+        save_progress(
+            user_id=user_id,
+            test_id=tid,
+            step=step,
+            scores=scores,
+            status="completed",
+            last_session_id=sid,
+        )
         finish_test(vk, user_id, tid, scores)
 
 
@@ -891,7 +1235,7 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
     if step >= len(qs):
         return False
     if low == "нет":
-        abandon_progress(user_id)
+        abandon_progress(user_id, progress.get("last_session_id"))
         send_message(
             vk,
             user_id,
@@ -913,6 +1257,8 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     """Обрабатывает команды меню. Возвращает True, если сообщение обработано."""
     stripped = text.strip()
     t = _normalize_cmd(text)
+    if stripped == "/stats" or t == "/stats":
+        return handle_stats_command(vk, user_id)
     if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
         send_welcome(vk, user_id)
         return True
