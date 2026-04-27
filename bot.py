@@ -1,15 +1,17 @@
+import contextvars
 import io
 import json
 import os
 import sqlite3
 import threading
 import time
+import unicodedata
 from datetime import datetime
 
 import openpyxl
 import requests
 import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.bot_longpoll import CHAT_START_ID, VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.upload import VkUpload
 
@@ -61,6 +63,14 @@ _LONGPOLL_TRANSIENT = (
     requests.exceptions.ConnectionError,
     requests.exceptions.ChunkedEncodingError,
 )
+
+# peer_id для vk.messages.send (диалог или беседа); в reminder-потоке не задан
+_REPLY_PEER_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar("reply_peer_id", default=None)
+
+
+def _peer_id_for_send(fallback_from_id: int) -> int:
+    p = _REPLY_PEER_ID.get()
+    return p if p is not None else fallback_from_id
 
 TEST_DDO = "ddo"
 TEST_OPG = "opg"
@@ -696,6 +706,19 @@ def is_stats_admin(vk, user_id: int) -> bool:
         return True
     if user_id <= 0 or GROUP_ID_ABS <= 0:
         return False
+    peer = _REPLY_PEER_ID.get()
+    if peer is not None and peer >= CHAT_START_ID:
+        try:
+            data = vk.messages.getConversationMembers(peer_id=peer)
+            for item in data.get("items", []):
+                mid = item.get("member_id")
+                if mid == user_id:
+                    if item.get("is_owner") or item.get("is_admin"):
+                        return True
+                    return False
+        except Exception as e:
+            print(f"[is_stats_admin chat peer={peer}] {e}")
+        return False
     now = time.time()
     cached = _STATS_ADMIN_CACHE.get(user_id)
     if cached and now - cached[0] < _STATS_ADMIN_TTL_SEC:
@@ -810,7 +833,8 @@ def send_stats_export(vk, user_id: int):
     bio = io.BytesIO(data)
     bio.name = fname
     upload = VkUpload(vk)
-    saved = upload.document_message(bio, title=fname, peer_id=user_id)
+    peer = _peer_id_for_send(user_id)
+    saved = upload.document_message(bio, title=fname, peer_id=peer)
     if isinstance(saved, list) and saved:
         saved = saved[0]
     if isinstance(saved, dict) and "doc" in saved:
@@ -819,7 +843,7 @@ def send_stats_export(vk, user_id: int):
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
     vk.messages.send(
-        user_id=user_id,
+        peer_id=peer,
         random_id=0,
         message="Выгрузка ответов участников (все записанные ответы по сессиям).",
         attachment=att_str,
@@ -954,7 +978,8 @@ def keyboard_for_test(test_id: str, step: int = 0):
 
 
 def send_message(vk, user_id, message, keyboard=None):
-    vk.messages.send(user_id=user_id, random_id=0, message=message, keyboard=keyboard)
+    peer = _peer_id_for_send(user_id)
+    vk.messages.send(peer_id=peer, random_id=0, message=message, keyboard=keyboard)
 
 
 def render_question(test_id: str, step: int) -> str:
@@ -1218,13 +1243,44 @@ def _normalize_cmd(s: str) -> str:
     return s.strip().lower()
 
 
+def _normalize_unicode_command(s: str) -> str:
+    """NFKC + замена похожих на «/» символов (некоторые клиенты шлют не ASCII U+002F)."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", s)
+    trans = str.maketrans(
+        {
+            "\u2044": "/",  # ⁄ fraction slash
+            "\u2215": "/",  # ∕ division slash
+            "\u29f8": "/",  # ⧸ big solidus
+            "\uff0f": "/",  # ／ fullwidth solidus
+        }
+    )
+    return s.translate(trans)
+
+
 def _strip_command_text(s: str) -> str:
     """Убирает невидимые символы и лишние пробелы (мобильные клиенты / копипаст)."""
     if not s:
         return ""
+    s = _normalize_unicode_command(s)
     for ch in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
         s = s.replace(ch, "")
     return " ".join(s.split()).strip()
+
+
+def _message_command_text(message: dict) -> str:
+    """Текст для разбора команд: text или склейка payload из message.reply_message."""
+    parts: list[str] = []
+    t = message.get("text")
+    if isinstance(t, str) and t.strip():
+        parts.append(t)
+    rep = message.get("reply_message")
+    if isinstance(rep, dict):
+        rt = rep.get("text")
+        if isinstance(rt, str) and rt.strip():
+            parts.append(rt)
+    return "\n".join(parts) if parts else ""
 
 
 def _token_is_stats(token: str) -> bool:
@@ -1384,26 +1440,29 @@ def main():
                     continue
                 message = event.obj.message
                 user_id = message["from_id"]
-                raw = message.get("text") or ""
-                if isinstance(raw, str):
-                    raw_cmd = raw
-                else:
-                    raw_cmd = str(raw)
+                peer_id = message.get("peer_id")
+                if peer_id is None:
+                    peer_id = user_id
+                raw_cmd = _message_command_text(message)
                 text_stripped = _strip_command_text(raw_cmd)
                 text_lower = text_stripped.lower()
-                if dispatch_command(vk, user_id, raw_cmd):
-                    continue
-                if handle_reminder_continue_choice(vk, user_id, raw):
-                    continue
-                if text_lower in ("1", "2", "3", "4"):
-                    handle_answer(vk, user_id, text_lower)
-                else:
-                    send_message(
-                        vk,
-                        user_id,
-                        "Не понял команду. Напиши «меню» или выбери тест кнопкой внизу.",
-                        keyboard=build_menu_keyboard(),
-                    )
+                tok = _REPLY_PEER_ID.set(peer_id)
+                try:
+                    if dispatch_command(vk, user_id, raw_cmd):
+                        continue
+                    if handle_reminder_continue_choice(vk, user_id, raw_cmd):
+                        continue
+                    if text_lower in ("1", "2", "3", "4"):
+                        handle_answer(vk, user_id, text_lower)
+                    else:
+                        send_message(
+                            vk,
+                            user_id,
+                            "Не понял команду. Напиши «меню» или выбери тест кнопкой внизу.",
+                            keyboard=build_menu_keyboard(),
+                        )
+                finally:
+                    _REPLY_PEER_ID.reset(tok)
         except _LONGPOLL_TRANSIENT as e:
             print(
                 f"[longpoll] сетевая ошибка ({type(e).__name__}): {e!s}. "
