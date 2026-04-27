@@ -490,6 +490,14 @@ def complete_progress(user_id: int):
         conn.commit()
 
 
+def abandon_progress(user_id: int):
+    """Сбрасывает незавершённый тест (например, пользователь отказался продолжать после напоминания)."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM user_progress WHERE user_id=?", (user_id,))
+        conn.commit()
+
+
 def save_result(user_id: int, test_id: str, scores: dict, top3: list):
     """Сохраняет результат; учитывает старые БД с колонкой best_area вместо/рядом с best_type."""
     best_type = top3[0][0] if top3 else "Не определено"
@@ -557,6 +565,13 @@ def build_answer_keyboard_quad():
     kb.add_button("2", color=VkKeyboardColor.PRIMARY)
     kb.add_button("3", color=VkKeyboardColor.PRIMARY)
     kb.add_button("4", color=VkKeyboardColor.PRIMARY)
+    return kb.get_keyboard()
+
+
+def build_reminder_continue_keyboard():
+    kb = VkKeyboard(one_time=False, inline=True)
+    kb.add_button("Да", color=VkKeyboardColor.POSITIVE)
+    kb.add_button("Нет", color=VkKeyboardColor.NEGATIVE)
     return kb.get_keyboard()
 
 
@@ -791,8 +806,9 @@ def reminder_worker():
                 send_message(
                     vk,
                     uid,
-                    f"⏰ Напоминание: ты на вопросе {step_display} из {total}.\nПродолжим? Выбери ответ кнопками.",
-                    keyboard=keyboard_for_test(tid, st if st < len(qs) else 0),
+                    f"⏰ Напоминание: ты на вопросе {step_display} из {total}.\n"
+                    "Продолжим? «Да» — вернёмся к опросу, «Нет» — выход в меню.",
+                    keyboard=build_reminder_continue_keyboard(),
                 )
                 set_reminded(uid)
         except Exception as e:
@@ -802,6 +818,39 @@ def reminder_worker():
 
 def _normalize_cmd(s: str) -> str:
     return s.strip().lower()
+
+
+def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
+    """Ответ на напоминание: Да — показать текущий вопрос с цифрами; Нет — сбросить тест и меню."""
+    stripped = text.strip()
+    low = stripped.lower()
+    if low not in ("да", "нет"):
+        return False
+    progress = get_progress(user_id)
+    if not progress or progress["status"] != "in_progress":
+        return False
+    tid = progress["test_id"]
+    step = progress["step"]
+    qs = questions_for(tid)
+    if step >= len(qs):
+        return False
+    if low == "нет":
+        abandon_progress(user_id)
+        send_message(
+            vk,
+            user_id,
+            "Тест остановлен. Можно выбрать другую методику.",
+            keyboard=build_menu_keyboard(),
+        )
+        return True
+    touch_progress(user_id)
+    send_message(
+        vk,
+        user_id,
+        render_question(tid, step),
+        keyboard=keyboard_for_test(tid, step),
+    )
+    return True
 
 
 def dispatch_command(vk, user_id: int, text: str) -> bool:
@@ -886,6 +935,8 @@ def main():
                 text_stripped = raw.strip()
                 text_lower = text_stripped.lower()
                 if dispatch_command(vk, user_id, raw):
+                    continue
+                if handle_reminder_continue_choice(vk, user_id, raw):
                     continue
                 if text_lower in ("1", "2", "3", "4"):
                     handle_answer(vk, user_id, text_lower)
