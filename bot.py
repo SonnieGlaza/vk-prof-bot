@@ -748,6 +748,19 @@ def test_results_row_count() -> int:
         return int(cur.fetchone()[0])
 
 
+def incomplete_sessions_row_count() -> int:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM test_sessions WHERE status != 'completed'")
+        return int(cur.fetchone()[0])
+
+
+def _top3_from_scores(scores: dict) -> list:
+    if not scores:
+        return []
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
+
+
 def _vk_user_link(user_id: int) -> str:
     return f"https://vk.com/id{user_id}"
 
@@ -825,34 +838,110 @@ def build_stats_excel_bytes() -> bytes:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT user_id, test_id, finished_at, scores_json, top3_json
+            SELECT id, user_id, test_id, finished_at, scores_json, top3_json
             FROM test_results
             ORDER BY finished_at ASC, id ASC
             """
         )
-        db_rows = cur.fetchall()
+        result_rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT id, user_id, test_id, started_at, status, final_scores_json
+            FROM test_sessions
+            WHERE status != 'completed'
+            ORDER BY started_at ASC, id ASC
+            """
+        )
+        session_rows = cur.fetchall()
+        session_ids = [int(r[0]) for r in session_rows]
+        answer_counts: dict[int, int] = {}
+        if session_ids:
+            placeholders = ",".join("?" * len(session_ids))
+            cur.execute(
+                f"""
+                SELECT session_id, COUNT(*) AS c
+                FROM answer_log
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+                """,
+                session_ids,
+            )
+            answer_counts = {int(sid): int(c) for sid, c in cur.fetchall()}
+
+    merged: list[tuple] = []
+    for rid, uid, tid_raw, finished_at, scores_json, top3_json in result_rows:
+        try:
+            ts = int(finished_at)
+        except (TypeError, ValueError):
+            ts = 0
+        merged.append(
+            (ts, 0, int(rid), "result", uid, tid_raw, finished_at, scores_json, top3_json, None)
+        )
+    for sid, uid, tid_raw, started_at, sess_status, final_scores_json in session_rows:
+        try:
+            ts = int(started_at)
+        except (TypeError, ValueError):
+            ts = 0
+        merged.append(
+            (ts, 1, int(sid), "session", uid, tid_raw, started_at, sess_status, final_scores_json, sid)
+        )
+    merged.sort(key=lambda x: (x[0], x[1], x[2]))
+
     user_serial: dict[int, int] = {}
     next_serial = 1
-    for uid, tid_raw, finished_at, scores_json, top3_json in db_rows:
+    for _, _, _, kind, uid, tid_raw, t_field, payload_a, payload_b, sid_maybe in merged:
         uid = int(uid)
-        tid = normalize_test_id(tid_raw or TEST_DDO)
+        tid = normalize_test_id((tid_raw or TEST_DDO) if isinstance(tid_raw, str) else TEST_DDO)
         if uid not in user_serial:
             user_serial[uid] = next_serial
             next_serial += 1
         no = user_serial[uid]
         link = _vk_user_link(uid)
         test_name = _test_title_for_export(tid)
-        finished_txt = "Да"
-        try:
-            dt = datetime.utcfromtimestamp(int(finished_at)).strftime("%Y-%m-%d %H:%M:%S")
-        except (TypeError, ValueError, OSError):
-            dt = ""
-        try:
-            scores = json.loads(scores_json) if scores_json else {}
-            top3 = json.loads(top3_json) if top3_json else []
-        except json.JSONDecodeError:
-            scores, top3 = {}, []
-        summary = _export_result_summary(tid, scores, top3)
+        if kind == "result":
+            finished_txt = "Да"
+            try:
+                dt = datetime.utcfromtimestamp(int(t_field)).strftime("%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError, OSError):
+                dt = ""
+            try:
+                scores = json.loads(payload_a) if payload_a else {}
+                top3 = json.loads(payload_b) if payload_b else []
+            except json.JSONDecodeError:
+                scores, top3 = {}, []
+            summary = _export_result_summary(tid, scores, top3)
+        else:
+            sess_status = str(payload_a or "")
+            if sess_status == "abandoned":
+                finished_txt = "Нет — прервано"
+                status_ru = "прервано"
+            elif sess_status == "in_progress":
+                finished_txt = "Нет"
+                status_ru = "в процессе"
+            else:
+                finished_txt = "Нет"
+                status_ru = sess_status or "неизвестно"
+            try:
+                dt = datetime.utcfromtimestamp(int(t_field)).strftime("%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError, OSError):
+                dt = ""
+            sid = int(sid_maybe) if sid_maybe is not None else 0
+            n_ans = answer_counts.get(sid, 0)
+            try:
+                total_q = len(questions_for(tid))
+            except Exception:
+                total_q = 0
+            parts = [f"Сессия {sid}, {status_ru}. Отвечено шагов: {n_ans}" + (f" из {total_q}." if total_q else ".")]
+            if payload_b:
+                try:
+                    scores = json.loads(payload_b)
+                    if isinstance(scores, dict) and scores:
+                        extra = _export_result_summary(tid, scores, _top3_from_scores(scores))
+                        if extra:
+                            parts.append(f"Накоплено по ответам: {extra}")
+                except json.JSONDecodeError:
+                    pass
+            summary = "\n".join(parts)
         ws.append([no, link, test_name, finished_txt, dt, summary])
     bio = io.BytesIO()
     wb.save(bio)
@@ -860,7 +949,8 @@ def build_stats_excel_bytes() -> bytes:
 
 
 def send_stats_export(vk, user_id: int):
-    n_rows = test_results_row_count()
+    n_done = test_results_row_count()
+    n_open = incomplete_sessions_row_count()
     data = build_stats_excel_bytes()
     fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
@@ -876,8 +966,9 @@ def send_stats_export(vk, user_id: int):
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
     note = (
-        f"Excel: по одной строке на завершённый тест. Записей в базе: {n_rows}. "
-        "Колонка «№» — порядковый номер пользователя (первое появление vk id в хронологии = новый номер). "
+        f"Excel: строки = завершённые тесты ({n_done}) + незавершённые сессии ({n_open}). "
+        "Колонка «№» — порядковый номер пользователя (первое появление vk id в общей хронологии строк = новый номер). "
+        "Для незавершённых в «Дата» — время старта сессии; в «Итоги» — сколько шагов отвечено. "
         "Пошаговые ответы в файл не выгружаются."
     )
     vk.messages.send(
