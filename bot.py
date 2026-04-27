@@ -2,6 +2,7 @@ import contextvars
 import io
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -37,6 +38,8 @@ for _part in _STATS_ADMIN_IDS_RAW.split(","):
         STATS_ADMIN_IDS.add(int(_p))
     except ValueError:
         pass
+
+STATS_DEBUG = (os.environ.get("STATS_DEBUG") or "").strip().lower() in ("1", "true", "yes")
 
 # SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
 _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
@@ -855,7 +858,8 @@ def handle_stats_command(vk, user_id: int) -> bool:
         send_message(
             vk,
             user_id,
-            "Команда /stats доступна только администраторам этого сообщества.",
+            "Команда /stats только для администраторов. Если вы админ, добавьте свой числовой VK id "
+            "в переменную STATS_ADMIN_IDS на сервере бота (Railway → Variables), через запятую без пробелов.",
         )
         return True
     try:
@@ -1269,17 +1273,25 @@ def _strip_command_text(s: str) -> str:
     return " ".join(s.split()).strip()
 
 
-def _message_command_text(message: dict) -> str:
-    """Текст для разбора команд: text или склейка payload из message.reply_message."""
-    parts: list[str] = []
-    t = message.get("text")
+def _collect_nested_text(obj, parts: list[str], depth: int = 0):
+    if depth > 5 or not isinstance(obj, dict):
+        return
+    t = obj.get("text")
     if isinstance(t, str) and t.strip():
         parts.append(t)
-    rep = message.get("reply_message")
+    rep = obj.get("reply_message")
     if isinstance(rep, dict):
-        rt = rep.get("text")
-        if isinstance(rt, str) and rt.strip():
-            parts.append(rt)
+        _collect_nested_text(rep, parts, depth + 1)
+    for fw in obj.get("fwd_messages") or []:
+        if isinstance(fw, dict):
+            _collect_nested_text(fw, parts, depth + 1)
+
+
+def _message_command_text(message: dict) -> str:
+    """Текст для разбора команд: text, reply_message, пересланные сообщения."""
+    parts: list[str] = []
+    if isinstance(message, dict):
+        _collect_nested_text(message, parts, 0)
     return "\n".join(parts) if parts else ""
 
 
@@ -1298,8 +1310,21 @@ def _token_is_stats(token: str) -> bool:
     return base in ("/stats", "!stats", "?stats")
 
 
+def _line_is_export_alias(line: str) -> bool:
+    t = _strip_command_text(line).strip(".,;:!?").lower()
+    return t in (
+        "выгрузка",
+        "экспорт",
+        "export",
+        "скачать",
+        "скачать ответы",
+        "статистика",
+        "стат",
+    )
+
+
 def _is_stats_command(text: str) -> bool:
-    """Клиенты вроде VK Пейджер присылают несколько строк (имя, чат, команда) — ищем команду в любой строке и в токенах."""
+    """Клиенты вроде VK Пейджер присылают несколько строк — ищем команду в любой строке, токенах и по regex."""
     if not text or not isinstance(text, str):
         return False
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -1310,13 +1335,27 @@ def _is_stats_command(text: str) -> bool:
             chunks.append(line)
     if not chunks:
         return False
+    for ln in chunks:
+        if _line_is_export_alias(ln):
+            return True
     blob = " ".join(chunks)
     if _token_is_stats(blob):
         return True
     for part in blob.split():
         if _token_is_stats(part):
             return True
+    low = blob.lower()
+    if re.search(r"(?:^|[\s\n\u00a0])[/!?.]?\s*stats(?:@|[\s,;.]|$)", low):
+        return True
+    if re.search(r"(?:^|[\s\n\u00a0])стат(?:истика)?(?:[\s,;.]|$)", low):
+        return True
+    if re.search(r"stats", low) and re.search(r"[/!]", low):
+        return True
     return False
+
+
+def _wants_stats_export(text: str) -> bool:
+    return _is_stats_command(text)
 
 
 def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
@@ -1358,7 +1397,7 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     """Обрабатывает команды меню. Возвращает True, если сообщение обработано."""
     stripped = _strip_command_text(text)
     t = _normalize_cmd(stripped)
-    if _is_stats_command(text):
+    if _wants_stats_export(text):
         return handle_stats_command(vk, user_id)
     if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
         send_welcome(vk, user_id)
@@ -1443,7 +1482,12 @@ def main():
                 peer_id = message.get("peer_id")
                 if peer_id is None:
                     peer_id = user_id
-                raw_cmd = _message_command_text(message)
+                raw_cmd = _message_command_text(dict(message))
+                if STATS_DEBUG and not _strip_command_text(raw_cmd):
+                    print(
+                        f"[stats_debug] empty text from_id={user_id} peer={peer_id} "
+                        f"keys={list(dict(message).keys())[:25]}"
+                    )
                 text_stripped = _strip_command_text(raw_cmd)
                 text_lower = text_stripped.lower()
                 tok = _REPLY_PEER_ID.set(peer_id)
