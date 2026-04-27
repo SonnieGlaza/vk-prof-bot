@@ -1227,19 +1227,40 @@ def _strip_command_text(s: str) -> str:
     return " ".join(s.split()).strip()
 
 
-def _is_stats_command(text: str) -> bool:
-    s = _strip_command_text(text)
-    if not s:
+def _token_is_stats(token: str) -> bool:
+    """Один токен — команда статистики (учитываем /stats@club, !stats, хвост пунктуации)."""
+    t = _strip_command_text(token)
+    if not t:
         return False
-    low = s.lower()
-    if low in ("stats", "статистика", "стат"):
+    t = t.strip(".,;:!?")
+    if not t:
+        return False
+    tl = t.lower()
+    if tl in ("stats", "статистика", "стат"):
         return True
-    parts = low.split()
-    if not parts:
+    base = tl.split("@", 1)[0]
+    return base in ("/stats", "!stats", "?stats")
+
+
+def _is_stats_command(text: str) -> bool:
+    """Клиенты вроде VK Пейджер присылают несколько строк (имя, чат, команда) — ищем команду в любой строке и в токенах."""
+    if not text or not isinstance(text, str):
         return False
-    first = parts[0]
-    base = first.split("@", 1)[0]
-    return base in ("/stats", "!stats")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    chunks: list[str] = []
+    for line in normalized.split("\n"):
+        line = _strip_command_text(line)
+        if line:
+            chunks.append(line)
+    if not chunks:
+        return False
+    blob = " ".join(chunks)
+    if _token_is_stats(blob):
+        return True
+    for part in blob.split():
+        if _token_is_stats(part):
+            return True
+    return False
 
 
 def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
