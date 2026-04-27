@@ -26,6 +26,7 @@ _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
 DB_PATH = (os.environ.get("SQLITE_PATH") or os.environ.get("DB_PATH") or _DB_DEFAULT).strip() or _DB_DEFAULT
 OPG_PATH = os.path.join(_BASE, "opg_questions.json")
 JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
+YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 RAVEN_PATH = os.path.join(_BASE, "raven_questions.json")
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
@@ -49,6 +50,7 @@ _LONGPOLL_TRANSIENT = (
 TEST_DDO = "ddo"
 TEST_OPG = "opg"
 TEST_JOVASHI = "jovashi"
+TEST_YOVASHI = "yovashi"
 TEST_KETTELL = "kettell"
 TEST_RAVEN = "raven"
 TEST_EN60 = "en60"
@@ -63,10 +65,12 @@ LABEL_KETTELL = "Кеттелл"
 LABEL_RAVEN = "Равен"
 LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
+LABEL_YOVASHI = "Йоваши (проф. склонности, модиф. Резапкиной)"
 
 # Подписи на кнопках клавиатуры (лимит ВК)
 KB_OPG = "ОПГ"
 KB_PROF_TABLE = "Таблица (ОПТ проф.)"
+KB_YOVASHI = "Йоваши"
 KB_KETTELL = "Кеттелл"
 KB_RAVEN = "Равен"
 KB_EN60 = "ЭН - 60"
@@ -257,6 +261,9 @@ CAREER_HINTS_OPG = {
 # --- Таблица ОПТ: вопросы из JSON (модификация Резапкиной) ---
 QUESTIONS_JOVASHI = _load_questions(JOVASHI_PATH)
 
+# --- Йоваши: отдельная формулировка вопросов, та же логика подсчёта сфер ---
+QUESTIONS_YOVASHI = _load_questions(YOVASHI_PATH)
+
 QUESTIONS_KETTELL = _load_questions(KETTELL_PATH)
 KETTELL_TRAITS = {
     "ПР": "Прагматичность / ориентация на факты и порядок",
@@ -302,11 +309,16 @@ WELCOME_TEXT = (
     "• ДДО (Климов) — 20 пар занятий, выбери одно; покажет склонность к типам «человек–природа», «человек–техника» и др.\n"
     f"• {LABEL_OPG} — 24 вопроса, 4 варианта; оценивает готовность к выбору профессии (знания, эмоции, действия, общение).\n"
     f"• {LABEL_PROF_TABLE} — 24 вопроса, 3 варианта; сферы интересов: люди, техника, искусство и др.\n"
-    f"• {LABEL_KETTELL} — 18 вопросов, 3 варианта; упрощённый срез черт (не полная официальная методика).\n"
-    f"• {LABEL_RAVEN} — 12 задач на логику; учебный формат, не оригинальные таблицы Равена.\n"
-    f"• {LABEL_EN60} — 30 утверждений «да/нет»; ориентир по экстраверсии и эмоциональной лабильности.\n"
-    f"• {LABEL_EN57} — то же в коротком варианте, 24 утверждения.\n\n"
-    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), кеттелл, равен, эн-60, эн-57. "
+    f"• {LABEL_YOVASHI} — 24 вопроса, 3 варианта; то же направление, что таблица ОПТ, другие формулировки вопросов.\n"
+    f"• {LABEL_KETTELL} — 18 вопросов, 3 варианта. Расшифровка: методика Кеттелла (16PF) — многофакторный опросник личности; "
+    "в боте — короткий учебный срез, не замена полной стандартизации.\n"
+    f"• {LABEL_RAVEN} — 12 задач на логику. Расшифровка: прогрессивные матрицы Равена (SPM) оценивают невербальный интеллект; "
+    "здесь — учебные аналоги, не оригинальные таблицы.\n"
+    f"• {LABEL_EN60} — 30 утверждений «да/нет». Расшифровка: опросник Айзенка (шкалы E — экстраверсия, N — нейротизм); "
+    "формат ориентирован на взрослых.\n"
+    f"• {LABEL_EN57} — 24 утверждения «да/нет». Расшифровка: тот же подход Айзенка (E и N), укороченный вариант; "
+    "удобнее для детей и подростков.\n\n"
+    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл, равен, эн-60, эн-57. "
     "Слово «меню» или «привет» снова покажет это сообщение.\n\n"
     "На вопросы отвечай кнопками с цифрами под сообщением. Удачи!"
 )
@@ -328,6 +340,8 @@ def questions_for(test_id: str):
         return QUESTIONS_OPG
     if tid == TEST_JOVASHI:
         return QUESTIONS_JOVASHI
+    if tid == TEST_YOVASHI:
+        return QUESTIONS_YOVASHI
     if tid == TEST_KETTELL:
         return QUESTIONS_KETTELL
     if tid == TEST_RAVEN:
@@ -345,7 +359,7 @@ def empty_scores(test_id: str) -> dict:
         return {k: 0 for k in PROFESSION_TYPES}
     if tid == TEST_OPG:
         return {k: 0 for k in OPG_DIMENSIONS}
-    if tid == TEST_JOVASHI:
+    if tid in (TEST_JOVASHI, TEST_YOVASHI):
         return {k: 0 for k in JOVASHI_SPHERES}
     if tid == TEST_KETTELL:
         return {k: 0 for k in KETTELL_TRAITS}
@@ -603,6 +617,8 @@ def build_menu_keyboard():
     kb.add_line()
     kb.add_button(KB_PROF_TABLE, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
+    kb.add_button(KB_YOVASHI, color=VkKeyboardColor.POSITIVE)
+    kb.add_line()
     kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_RAVEN, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
@@ -662,6 +678,7 @@ def _label_for_test(test_id: str) -> str:
         TEST_DDO: "ДДО (Климов)",
         TEST_OPG: LABEL_OPG,
         TEST_JOVASHI: LABEL_PROF_TABLE,
+        TEST_YOVASHI: LABEL_YOVASHI,
         TEST_KETTELL: LABEL_KETTELL,
         TEST_RAVEN: LABEL_RAVEN,
         TEST_EN60: LABEL_EN60,
@@ -703,6 +720,13 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
         lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
         lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
+    elif tid == TEST_YOVASHI:
+        lines = [f"📊 Твой результат по «{LABEL_YOVASHI}» (топ-3 сферы):"]
+        for i, (key, points) in enumerate(top3, 1):
+            interp = _interpret_jovashi(points)
+            lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
+        lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
+        lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
     elif tid == TEST_KETTELL:
         lines = [f"📊 Твой результат по «{LABEL_KETTELL}» (топ-3 черты):"]
         for i, (key, points) in enumerate(top3, 1):
@@ -731,10 +755,17 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         max_e = (len(QUESTIONS_EN60) + 1) // 2 if tid == TEST_EN60 else (len(QUESTIONS_EN57) + 1) // 2
         max_n = len(QUESTIONS_EN60) // 2 if tid == TEST_EN60 else len(QUESTIONS_EN57) // 2
         label = LABEL_EN60 if tid == TEST_EN60 else LABEL_EN57
+        age_note = (
+            "Формат рассчитан прежде всего на взрослых."
+            if tid == TEST_EN60
+            else "Укороченный вариант, удобнее для детей и подростков."
+        )
         lines = [
             f"📊 Результат «{label}» (ориентир, не клиническая диагностика):",
             f"• {EN_LABELS['E']}: {e} из {max_e} по ответам «да» к соответствующим пунктам.",
             f"• {EN_LABELS['N']}: {n} из {max_n} по ответам «да» к соответствующим пунктам.",
+            "",
+            age_note,
             "",
             "Больше «да» по экстраверсии — склонность к активности и контактам; "
             "больше «да» по нейротизму — сильнее реакция на стресс и переживания. "
@@ -896,6 +927,9 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("таблица", "таблица опт", "опт"):
         start_test(vk, user_id, TEST_JOVASHI)
         return True
+    if t in ("йоваши", "yovashi", "iovashi", "jovashi"):
+        start_test(vk, user_id, TEST_YOVASHI)
+        return True
     if t in ("кеттелл", "kettell", "cattell"):
         start_test(vk, user_id, TEST_KETTELL)
         return True
@@ -917,6 +951,9 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         return True
     if stripped == KB_PROF_TABLE:
         start_test(vk, user_id, TEST_JOVASHI)
+        return True
+    if stripped == KB_YOVASHI:
+        start_test(vk, user_id, TEST_YOVASHI)
         return True
     if stripped == KB_KETTELL:
         start_test(vk, user_id, TEST_KETTELL)
