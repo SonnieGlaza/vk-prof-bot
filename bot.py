@@ -55,7 +55,7 @@ TEST_EN60 = "en60"
 TEST_EN57 = "en57"
 LEGACY_HOLLAND = "holland"
 
-LABEL_OPG = "ОПГ (опросник прогресс. готовности)"
+LABEL_OPG = "ОПГ (опросник прогрессивной готовности)"
 LABEL_PROF_TABLE = (
     "Таблица для ориентировочного определения предпочтительности типа будущей профессии"
 )
@@ -381,7 +381,8 @@ def init_db():
                 started_at INTEGER NOT NULL,
                 last_activity_at INTEGER NOT NULL,
                 reminded_at INTEGER,
-                test_id TEXT NOT NULL DEFAULT 'ddo'
+                test_id TEXT NOT NULL DEFAULT 'ddo',
+                reminder_pending INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -399,6 +400,7 @@ def init_db():
             """
         )
         _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
+        _ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
@@ -412,22 +414,30 @@ def now_ts():
     return int(time.time())
 
 
-def save_progress(user_id: int, test_id: str, step: int, scores: dict, status: str = "in_progress"):
+def save_progress(
+    user_id: int,
+    test_id: str,
+    step: int,
+    scores: dict,
+    status: str = "in_progress",
+    reminder_pending: int = 0,
+):
     ts = now_ts()
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO user_progress (user_id, step, scores_json, status, started_at, last_activity_at, reminded_at, test_id)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+            INSERT INTO user_progress (user_id, step, scores_json, status, started_at, last_activity_at, reminded_at, test_id, reminder_pending)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
             step=excluded.step,
             scores_json=excluded.scores_json,
             status=excluded.status,
             last_activity_at=excluded.last_activity_at,
-            test_id=excluded.test_id
+            test_id=excluded.test_id,
+            reminder_pending=excluded.reminder_pending
             """,
-            (user_id, step, json.dumps(scores, ensure_ascii=False), status, ts, ts, test_id),
+            (user_id, step, json.dumps(scores, ensure_ascii=False), status, ts, ts, test_id, reminder_pending),
         )
         conn.commit()
 
@@ -436,7 +446,7 @@ def touch_progress(user_id: int):
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE user_progress SET last_activity_at=? WHERE user_id=?",
+            "UPDATE user_progress SET last_activity_at=?, reminder_pending=0 WHERE user_id=?",
             (now_ts(), user_id),
         )
         conn.commit()
@@ -452,12 +462,22 @@ def set_reminded(user_id: int):
         conn.commit()
 
 
+def set_reminder_pending(user_id: int, pending: int):
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE user_progress SET reminder_pending=? WHERE user_id=?",
+            (1 if pending else 0, user_id),
+        )
+        conn.commit()
+
+
 def get_progress(user_id: int):
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT step, scores_json, status, test_id
+            SELECT step, scores_json, status, test_id, reminder_pending
             FROM user_progress
             WHERE user_id=?
             """,
@@ -466,14 +486,15 @@ def get_progress(user_id: int):
         row = cur.fetchone()
         if not row:
             return None
-        step, scores_json, status, test_id = row
+        step, scores_json, status, test_id, reminder_pending = row
         scores = json.loads(scores_json)
         tid = normalize_test_id(test_id or TEST_DDO)
+        rp = int(reminder_pending or 0)
         if tid == TEST_OPG and scores and not set(scores.keys()) <= set(OPG_DIMENSIONS):
             scores = empty_scores(TEST_OPG)
             step = 0
-            save_progress(user_id=user_id, test_id=TEST_OPG, step=step, scores=scores, status=status)
-        return {"step": step, "scores": scores, "status": status, "test_id": tid}
+            save_progress(user_id=user_id, test_id=TEST_OPG, step=step, scores=scores, status=status, reminder_pending=rp)
+        return {"step": step, "scores": scores, "status": status, "test_id": tid, "reminder_pending": rp}
 
 
 def complete_progress(user_id: int):
@@ -810,6 +831,7 @@ def reminder_worker():
                     "Продолжим? «Да» — вернёмся к опросу, «Нет» — выход в меню.",
                     keyboard=build_reminder_continue_keyboard(),
                 )
+                set_reminder_pending(uid, 1)
                 set_reminded(uid)
         except Exception as e:
             print(f"[reminder_worker] error: {e}")
@@ -828,6 +850,8 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         return False
     progress = get_progress(user_id)
     if not progress or progress["status"] != "in_progress":
+        return False
+    if not progress.get("reminder_pending"):
         return False
     tid = progress["test_id"]
     step = progress["step"]
