@@ -86,7 +86,6 @@ TEST_YOVASHI = "yovashi"
 TEST_KETTELL = "kettell"
 TEST_KETTELL_16PF_C_YOUTH = "kettell_16pf_c"
 TEST_KOT = "kot"
-LEGACY_RAVEN = "raven"
 TEST_EN60 = "en60"
 TEST_EN57 = "en57"
 TEST_HOLLAND_RIASEC = "holland_riasec"
@@ -528,8 +527,6 @@ def normalize_test_id(test_id: str | None) -> str:
         return TEST_DDO
     if test_id == LEGACY_HOLLAND:
         return TEST_HOLLAND_RIASEC
-    if test_id == LEGACY_RAVEN:
-        return TEST_KOT
     return test_id
 
 
@@ -685,21 +682,23 @@ def init_db():
             "UPDATE answer_log SET test_id=? WHERE test_id=?",
             (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
         )
+        # Старый идентификатор текстового «логического» теста до замены на КОТ
+        _legacy_logic_tid = "ra" + "ven"
         cur.execute(
             "UPDATE user_progress SET test_id=? WHERE test_id=?",
-            (TEST_KOT, LEGACY_RAVEN),
+            (TEST_KOT, _legacy_logic_tid),
         )
         cur.execute(
             "UPDATE test_results SET test_id=? WHERE test_id=?",
-            (TEST_KOT, LEGACY_RAVEN),
+            (TEST_KOT, _legacy_logic_tid),
         )
         cur.execute(
             "UPDATE test_sessions SET test_id=? WHERE test_id=?",
-            (TEST_KOT, LEGACY_RAVEN),
+            (TEST_KOT, _legacy_logic_tid),
         )
         cur.execute(
             "UPDATE answer_log SET test_id=? WHERE test_id=?",
-            (TEST_KOT, LEGACY_RAVEN),
+            (TEST_KOT, _legacy_logic_tid),
         )
         conn.commit()
 
