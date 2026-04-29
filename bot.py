@@ -54,6 +54,7 @@ KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
 RAVEN_PATH = os.path.join(_BASE, "raven_questions.json")
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
+HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
 
 REMINDER_CHECK_EVERY_SEC = 60
 REMINDER_AFTER_INACTIVE_MIN = 20
@@ -87,6 +88,7 @@ TEST_KETTELL_16PF_C_YOUTH = "kettell_16pf_c"
 TEST_RAVEN = "raven"
 TEST_EN60 = "en60"
 TEST_EN57 = "en57"
+TEST_HOLLAND_RIASEC = "holland_riasec"
 LEGACY_HOLLAND = "holland"
 
 LABEL_OPG = "ОПГ (опросник прогрессивной готовности)"
@@ -98,6 +100,7 @@ LABEL_KETTELL_16PF_C_YOUTH = "Кеттелл 16PF/C (молодёжь)"
 LABEL_RAVEN = "Равен"
 LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
+LABEL_HOLLAND = "Голланд (RIASEC, пары профессий)"
 LABEL_YOVASHI = "Йоваши (проф. склонности, модиф. Резапкиной)"
 
 # Подписи на кнопках клавиатуры (лимит ВК)
@@ -109,6 +112,7 @@ KB_KETTELL_16PF_C_YOUTH = "16PF/C (мол.)"
 KB_RAVEN = "Равен"
 KB_EN60 = "ЭН - 60"
 KB_EN57 = "ЭН - 57"
+KB_HOLLAND = "Голланд"
 
 # --- ДДО (Е.А. Климов) ---
 PROFESSION_TYPES = {
@@ -365,6 +369,58 @@ CAREER_HINTS_KETTELL = {
 
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
+QUESTIONS_HOLLAND_RIASEC = _load_questions(HOLLAND_RIASEC_PATH)
+
+# Голланд RIASEC: шесть типов; максимум совпадений по ключу (в т.ч. двойной зачёт, напр. 1в → R+I)
+HOLLAND_ORDER = ["R", "I", "S", "C", "E", "A"]
+HOLLAND_MAX = {"R": 15, "I": 15, "S": 15, "C": 15, "E": 15, "A": 14}
+HOLLAND_DIMENSIONS = {
+    "R": "Реалистический",
+    "I": "Интеллектуальный (исследовательский)",
+    "S": "Социальный",
+    "C": "Конвенциальный",
+    "E": "Предприимчивый",
+    "A": "Артистический",
+}
+
+CAREER_HINTS_HOLLAND = {
+    "R": (
+        "🛠️ Реалистический\n\n"
+        "Предпочитает работать с вещами и техникой, а не с людьми. Ориентирован на конкретику, "
+        "практические навыки и стабильность; ценит чёткие указания и традиционные ценности.\n\n"
+        "Близкие типы: интеллектуальный и конвенциальный. Противоположный: социальный."
+    ),
+    "I": (
+        "🔬 Интеллектуальный (исследовательский)\n\n"
+        "Ориентирован на идеи и объекты, любознателен, методичен, часто комфортен в одиночной работе. "
+        "Сильны аналитика, самостоятельность мышления, интерес к науке и исследованию.\n\n"
+        "Близкие типы: реалистический и артистический. Противоположный: предприимчивый."
+    ),
+    "S": (
+        "🤝 Социальный\n\n"
+        "Нуждается в контактах, предпочитает людей вещам; ответственен, эмпатичен, сильна вербальная сфера. "
+        "Тянет к обучению, лечению, консультированию, помощи.\n\n"
+        "Близкие типы: артистический и предприимчивый. Противоположный: реалистический."
+    ),
+    "C": (
+        "📋 Конвенциальный\n\n"
+        "Предпочитает структурированную, регламентированную деятельность, работу с символами, "
+        "цифрами, документами; дисциплина, аккуратность, практичность.\n\n"
+        "Близкие типы: реалистический и предприимчивый. Противоположный: артистический."
+    ),
+    "E": (
+        "📈 Предприимчивый\n\n"
+        "Энергия, инициатива, влияние на людей, организация и риск; высокие притязания, важно материальное благополучие; "
+        "меньше склонен к длительному рутинному усидчивому труду в одиночестве.\n\n"
+        "Близкие типы: конвенциальный и социальный. Противоположный: исследовательский."
+    ),
+    "A": (
+        "🎨 Артистический\n\n"
+        "Творчество, воображение, самостоятельность в ценностях, чувствительность; плохо переносит жёсткий регламент; "
+        "интерес к литературе, искусству, дизайну, сцене.\n\n"
+        "Близкие типы: интеллектуальный и социальный. Противоположный: конвенциальный."
+    ),
+}
 EN_LABELS = {"E": "Экстраверсия", "N": "Нейротизм / эмоциональная лабильность"}
 EN_LIE_LABEL = "Шкала «ложь» / социальной желательности (L)"
 
@@ -403,8 +459,9 @@ WELCOME_TEXT = (
     "• Равен — 60 учебных задач на логику (текстовый аналог; не оригинальные матрицы ПМР).\n"
     "• ЭН - 60 — 60 вопросов «да/нет» для детей и подростков; шкалы E, N и «ложь» (социальная желательность).\n"
     "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
-    "(достоверность ответов); формат ориентирован на взрослых.\n\n"
-    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл (16pf), "
+    "(достоверность ответов); формат ориентирован на взрослых.\n"
+    "• Голланд (RIASEC) — 42 пары профессий (вариант А / В); шесть типов предпочтений по ключу из методички.\n\n"
+    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, голланд, кеттелл (16pf), "
     "16pf/c (молодёжь), равен, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
 )
 
@@ -413,7 +470,7 @@ def normalize_test_id(test_id: str | None) -> str:
     if not test_id:
         return TEST_DDO
     if test_id == LEGACY_HOLLAND:
-        return TEST_OPG
+        return TEST_HOLLAND_RIASEC
     return test_id
 
 
@@ -444,6 +501,8 @@ def questions_for(test_id: str):
         return QUESTIONS_EN60
     if tid == TEST_EN57:
         return QUESTIONS_EN57
+    if tid == TEST_HOLLAND_RIASEC:
+        return QUESTIONS_HOLLAND_RIASEC
     return QUESTIONS_DDO
 
 
@@ -463,6 +522,8 @@ def empty_scores(test_id: str) -> dict:
         return {"E": 0, "N": 0, "L": 0}
     if tid == TEST_EN60:
         return {"E": 0, "N": 0, "L": 0}
+    if tid == TEST_HOLLAND_RIASEC:
+        return {k: 0 for k in HOLLAND_ORDER}
     return {}
 
 
@@ -549,7 +610,19 @@ def init_db():
         _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
             "UPDATE user_progress SET test_id=? WHERE test_id=?",
-            (TEST_OPG, LEGACY_HOLLAND),
+            (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
+        )
+        cur.execute(
+            "UPDATE test_results SET test_id=? WHERE test_id=?",
+            (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
+        )
+        cur.execute(
+            "UPDATE test_sessions SET test_id=? WHERE test_id=?",
+            (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
+        )
+        cur.execute(
+            "UPDATE answer_log SET test_id=? WHERE test_id=?",
+            (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
         )
         conn.commit()
 
@@ -653,6 +726,18 @@ def get_progress(user_id: int):
             save_progress(
                 user_id=user_id,
                 test_id=TEST_OPG,
+                step=step,
+                scores=scores,
+                status=status,
+                reminder_pending=rp,
+                last_session_id=lsid,
+            )
+        if tid == TEST_HOLLAND_RIASEC and scores and not set(scores.keys()) <= set(HOLLAND_ORDER):
+            scores = empty_scores(TEST_HOLLAND_RIASEC)
+            step = 0
+            save_progress(
+                user_id=user_id,
+                test_id=TEST_HOLLAND_RIASEC,
                 step=step,
                 scores=scores,
                 status=status,
@@ -880,6 +965,13 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
             f"{EN_LABELS['N']}: {n} из 24.\n"
             f"{EN_LIE_LABEL}: {l} из 12."
         )
+    if tid == TEST_HOLLAND_RIASEC:
+        lines = ["Шесть типов Голланда (суммы по ключу, с двойным зачётом при совпадениях в таблице):"]
+        for code in HOLLAND_ORDER:
+            mx = HOLLAND_MAX[code]
+            v = int(scores.get(code, 0))
+            lines.append(f"{HOLLAND_DIMENSIONS[code]}: {v} из {mx}.")
+        return "\n".join(lines)
     if not top3:
         return json.dumps(scores, ensure_ascii=False)
     if tid == TEST_DDO:
@@ -944,6 +1036,7 @@ def _test_title_for_export(test_id: str) -> str:
         TEST_RAVEN: LABEL_RAVEN,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
+        TEST_HOLLAND_RIASEC: LABEL_HOLLAND,
     }.get(test_id, test_id)
 
 
@@ -1219,6 +1312,7 @@ def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
     kb.add_button("ДДО", color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_OPG, color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_HOLLAND, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_PROF_TABLE, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
@@ -1292,6 +1386,7 @@ def _label_for_test(test_id: str) -> str:
         TEST_RAVEN: LABEL_RAVEN,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
+        TEST_HOLLAND_RIASEC: LABEL_HOLLAND,
     }.get(tid, "тест")
 
 
@@ -1424,6 +1519,30 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             "Больше баллов по E — склонность к активности и контактам; по N — сильнее чувствительность к стрессу. "
             "Высокий L может указывать на «социально желательные» ответы. Обсуди сомнения со специалистом.",
         ]
+    elif tid == TEST_HOLLAND_RIASEC:
+        lines = [
+            f"📊 Результат «{LABEL_HOLLAND}» (шесть типов по ключу из методички):",
+            "",
+            "Топ-3 по сумме совпадений:",
+        ]
+        for i, (code, points) in enumerate(top3, 1):
+            mx = HOLLAND_MAX.get(code, 15)
+            lines.append(f"{i}. {HOLLAND_DIMENSIONS[code]} — {points} из ориентир. макс. {mx}")
+        lines.append("")
+        lines.append("Все типы (R, I, S, C, E, A):")
+        for code in HOLLAND_ORDER:
+            v = int(scores.get(code, 0))
+            mx = HOLLAND_MAX[code]
+            lines.append(f"• {HOLLAND_DIMENSIONS[code]}: {v} из {mx}")
+        lines.append("")
+        lines.append(
+            "Где в таблице ключей один ответ отмечен в двух столбцах (например, вариант В в 1-м пункте), "
+            "в боте начисляются оба балла — как при ручной отметке по методичке."
+        )
+        lines.append(f"\n{CAREER_HINTS_HOLLAND.get(best_key, '')}")
+        lines.append(
+            "\nЭто ориентир по предпочтениям в профессии, не заменяет полноценную профориентационную беседу."
+        )
     else:
         lines = ["Результат сохранён. Открой меню и выбери другой тест."]
 
@@ -1834,6 +1953,9 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t.replace(" ", "") in ("эн-57", "эн57", "en-57", "en57"):
         start_test(vk, user_id, TEST_EN57)
         return True
+    if t in ("голланд", "holland", "riasec"):
+        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
+        return True
     # Подписи с клавиатуры (с заглавной)
     if stripped == "ДДО":
         start_test(vk, user_id, TEST_DDO)
@@ -1861,6 +1983,9 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         return True
     if stripped == KB_EN57:
         start_test(vk, user_id, TEST_EN57)
+        return True
+    if stripped == KB_HOLLAND:
+        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
         return True
     return False
 
