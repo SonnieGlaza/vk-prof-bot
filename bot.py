@@ -114,6 +114,12 @@ KB_EN60 = "ЭН - 60"
 KB_EN57 = "ЭН - 57"
 KB_HOLLAND = "Голланд"
 
+# Текст после любого успешно завершённого теста (ниже блока с результатами)
+POST_TEST_REFERRAL_TRUDVSEM = (
+    "Если после прохождения теста остались вопросы или хочется разобрать результат с живым человеком, "
+    "подключайтесь к кадровому центру «Работа России» — специалисты ответят и помогут сориентироваться дальше."
+)
+
 # --- ДДО (Е.А. Климов) ---
 PROFESSION_TYPES = {
     "Ч-П": "Человек-Природа",
@@ -1492,6 +1498,8 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             "\nСопоставь шкалы: благоприятнее, когда желание и отношение согласуются с умением (см. методичку)."
         )
         lines.append(f"\n{CAREER_HINTS_OPG.get(best_key, '')}")
+        lines.append("")
+        lines.append(POST_TEST_REFERRAL_TRUDVSEM)
         send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
         complete_progress(user_id)
         save_result(user_id, tid, scores, top3)
@@ -1641,6 +1649,8 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     else:
         lines = ["Результат сохранён. Открой меню и выбери другой тест."]
 
+    lines.append("")
+    lines.append(POST_TEST_REFERRAL_TRUDVSEM)
     send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
     complete_progress(user_id)
     save_result(user_id, tid, scores, top3)
