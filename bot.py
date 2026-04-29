@@ -91,7 +91,7 @@ TEST_EN57 = "en57"
 TEST_HOLLAND_RIASEC = "holland_riasec"
 LEGACY_HOLLAND = "holland"
 
-LABEL_OPG = "ОПГ (опросник прогрессивной готовности)"
+LABEL_OPG = "ОПГ (опросник профессиональной готовности)"
 LABEL_PROF_TABLE = (
     "Таблица для ориентировочного определения предпочтительности типа будущей профессии"
 )
@@ -279,21 +279,69 @@ def _load_questions(path: str):
         return json.load(_f)
 
 
-# --- ОПГ (опросник прогрессивной готовности): 24 вопроса, 4 варианта ---
-OPG_DIMENSIONS = {
-    "ПОЗ": "Познавательная готовность (знания о профессиях)",
-    "ЭМО": "Эмоциональная готовность (переживания, мотивация)",
-    "ДЕЯ": "Деятельностная готовность (действия, план, практика)",
-    "КОМ": "Коммуникативная готовность (разговоры, поддержка)",
-}
+# --- ОПГ (Л.Н. Кабардова): 50 высказываний, по 3 балла (умение, отношение, желание) → 150 шагов в боте;
+# столбцы бланка Ч-З / Ч-Т / Ч-П / Ч-Х / Ч-Ч — номера 1…50 по диагонали бланка (как на testoteka.narod.ru).
+OPG_SPHERES_ORDER = ["Ч-З", "Ч-Т", "Ч-П", "Ч-Х", "Ч-Ч"]
+OPG_ITEM_COUNT = 50
+OPG_MAX_PER_DIM = OPG_ITEM_COUNT // len(OPG_SPHERES_ORDER) * 2  # 10 пунктов в столбце × 2 балла
+OPG_META_KEY = "__opg_meta"
 
 QUESTIONS_OPG = _load_questions(OPG_PATH)
 
+
+def _opg_sphere_for_item(n: int) -> str:
+    return OPG_SPHERES_ORDER[(int(n) - 1) % len(OPG_SPHERES_ORDER)]
+
+
+def _opg_score_keys():
+    keys = []
+    for s in OPG_SPHERES_ORDER:
+        for dim in ("skill", "att", "wish"):
+            keys.append(f"{s}_{dim}")
+    return keys
+
+
+def _opg_sphere_subtotals(scores: dict) -> dict[str, dict[str, int]]:
+    out: dict[str, dict[str, int]] = {}
+    for s in OPG_SPHERES_ORDER:
+        out[s] = {
+            "skill": int(scores.get(f"{s}_skill", 0) or 0),
+            "att": int(scores.get(f"{s}_att", 0) or 0),
+            "wish": int(scores.get(f"{s}_wish", 0) or 0),
+        }
+    return out
+
+
+def _opg_finish_totals(scores: dict) -> tuple[list[tuple[str, int]], dict[str, dict[str, int]]]:
+    """Топ сфер по желанию (как в методичке) и таблица У/О/Ж по сферам."""
+    meta = scores.get(OPG_META_KEY)
+    if not isinstance(meta, dict):
+        meta = {}
+    subs = _opg_sphere_subtotals(scores)
+    for item_no_s, st in meta.items():
+        try:
+            item_no = int(item_no_s)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(st, dict):
+            continue
+        sp = _opg_sphere_for_item(item_no)
+        if int(st.get("skill", -1)) != 0:
+            continue
+        for dim in ("att", "wish"):
+            subs[sp][dim] -= int(st.get(dim, 0) or 0)
+            if subs[sp][dim] < 0:
+                subs[sp][dim] = 0
+    ranked = sorted(((s, subs[s]["wish"]) for s in OPG_SPHERES_ORDER), key=lambda x: x[1], reverse=True)
+    return ranked, subs
+
+
 CAREER_HINTS_OPG = {
-    "ПОЗ": "📚 Познавательная готовность — собирай факты: профессии, требования, вузы, рынок труда; консультируйся с педагогом.",
-    "ЭМО": "💚 Эмоциональная готовность — нормализуй тревогу, опирайся на ценности; при сильном стрессе обратись к школьному психологу.",
-    "ДЕЯ": "🎯 Деятельностная готовность — малые шаги: профориентация, проекты, практика; фиксируй цели на неделю/месяц.",
-    "КОМ": "🤝 Коммуникативная готовность — обсуждай планы с близкими и специалистами; учись формулировать запросы о помощи.",
+    "Ч-З": CAREER_HINTS_DDO["Ч-З"],
+    "Ч-Т": CAREER_HINTS_DDO["Ч-Т"],
+    "Ч-П": CAREER_HINTS_DDO["Ч-П"],
+    "Ч-Х": CAREER_HINTS_DDO["Ч-Х"],
+    "Ч-Ч": CAREER_HINTS_DDO["Ч-Ч"],
 }
 
 # --- Таблица ОПТ: вопросы из JSON (модификация Резапкиной) ---
@@ -448,8 +496,8 @@ WELCOME_TEXT = (
     "Доступные тесты:\n"
     "• ДДО (дифференциально-диагностический опросник Климова) — 20 пар занятий, выбери одно; "
     "покажет склонность к типам «человек–природа», «человек–техника» и др.\n"
-    "• ОПГ (опросник прогрессивной готовности) — 24 вопроса, 4 варианта; оценивает готовность к выбору профессии "
-    "(знания, эмоции, действия, общение).\n"
+    "• ОПГ (опросник профессиональной готовности, Л.Н. Кабардова) — 50 высказываний, на каждое три оценки 0–2 "
+    "(умение, отношение, желание); в боте 150 шагов; столбцы бланка — сферы Климова (Ч-З … Ч-Ч).\n"
     "• ОПТ (Таблица для ориентировочного определения предпочтительности типа будущей профессии) — 24 вопроса, "
     "3 варианта; сферы интересов: люди, техника, искусство и др.\n"
     "• Йоваши (проф. склонности, модиф. Резапкиной) — 24 вопроса, 3 варианта; выявление преобладающих склонностей "
@@ -511,7 +559,9 @@ def empty_scores(test_id: str) -> dict:
     if tid == TEST_DDO:
         return {k: 0 for k in PROFESSION_TYPES}
     if tid == TEST_OPG:
-        return {k: 0 for k in OPG_DIMENSIONS}
+        base = {k: 0 for k in _opg_score_keys()}
+        base[OPG_META_KEY] = {}
+        return base
     if tid in (TEST_JOVASHI, TEST_YOVASHI):
         return {k: 0 for k in JOVASHI_SPHERES}
     if tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
@@ -720,18 +770,22 @@ def get_progress(user_id: int):
         tid = normalize_test_id(test_id or TEST_DDO)
         rp = int(reminder_pending or 0)
         lsid = int(last_session_id) if last_session_id is not None else None
-        if tid == TEST_OPG and scores and not set(scores.keys()) <= set(OPG_DIMENSIONS):
-            scores = empty_scores(TEST_OPG)
-            step = 0
-            save_progress(
-                user_id=user_id,
-                test_id=TEST_OPG,
-                step=step,
-                scores=scores,
-                status=status,
-                reminder_pending=rp,
-                last_session_id=lsid,
-            )
+        if tid == TEST_OPG and scores:
+            need = set(_opg_score_keys()) | {OPG_META_KEY}
+            meta = scores.get(OPG_META_KEY)
+            legacy = any(x in scores for x in ("ПОЗ", "ЭМО", "ДЕЯ", "КОМ"))
+            if legacy or not need <= set(scores.keys()) or not isinstance(meta, dict):
+                scores = empty_scores(TEST_OPG)
+                step = 0
+                save_progress(
+                    user_id=user_id,
+                    test_id=TEST_OPG,
+                    step=step,
+                    scores=scores,
+                    status=status,
+                    reminder_pending=rp,
+                    last_session_id=lsid,
+                )
         if tid == TEST_HOLLAND_RIASEC and scores and not set(scores.keys()) <= set(HOLLAND_ORDER):
             scores = empty_scores(TEST_HOLLAND_RIASEC)
             step = 0
@@ -972,16 +1026,27 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
             v = int(scores.get(code, 0))
             lines.append(f"{HOLLAND_DIMENSIONS[code]}: {v} из {mx}.")
         return "\n".join(lines)
+    if tid == TEST_OPG:
+        ranked_wish, subs = _opg_finish_totals(scores)
+        lines = [
+            "ОПГ (Кабардова): топ сфер по «желанию» (с коррекцией при умении = 0):",
+        ]
+        for i, (sp, w) in enumerate(ranked_wish[:3], 1):
+            lines.append(f"{i}. {PROFESSION_TYPES.get(sp, sp)} — {w} (ориентир. макс. по шкале {OPG_MAX_PER_DIM})")
+        lines.append("")
+        for sp in OPG_SPHERES_ORDER:
+            d = subs[sp]
+            lines.append(
+                f"{PROFESSION_TYPES.get(sp, sp)}: умение {d['skill']}, отношение {d['att']}, желание {d['wish']} "
+                f"(макс. по каждой шкале в столбце ≈ {OPG_MAX_PER_DIM})."
+            )
+        return "\n".join(lines)
     if not top3:
         return json.dumps(scores, ensure_ascii=False)
     if tid == TEST_DDO:
         lines.append("Топ-3 типа Климова:")
         for i, (ptype, points) in enumerate(top3, 1):
             lines.append(f"{i}. {PROFESSION_TYPES.get(ptype, ptype)} — {points} б.")
-    elif tid == TEST_OPG:
-        lines.append("Топ-3 по ОПГ:")
-        for i, (code, points) in enumerate(top3, 1):
-            lines.append(f"{i}. {OPG_DIMENSIONS.get(code, code)} — {points} б.")
     elif tid in (TEST_JOVASHI, TEST_YOVASHI):
         lines.append("Топ-3 сферы:")
         for i, (key, points) in enumerate(top3, 1):
@@ -1396,6 +1461,34 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     sid = prog.get("last_session_id") if prog else None
     if sid:
         complete_test_session(sid, user_id, scores, "completed")
+    if tid == TEST_OPG:
+        ranked_wish, subs = _opg_finish_totals(scores)
+        top3 = ranked_wish[:3]
+        best_key = top3[0][0]
+        lines = [
+            f"📊 Результат «{LABEL_OPG}» (ориентир по методике Кабардовой):",
+            "",
+            "Топ-3 профессиональных сфер по сумме «желания» (включая строки с «умение» = 0 по правилам методички сумма скорректирована):",
+        ]
+        for i, (sp, w) in enumerate(top3, 1):
+            lines.append(f"{i}. {PROFESSION_TYPES[sp]} — {w} баллов (ориентир. макс. {OPG_MAX_PER_DIM})")
+        lines.append("")
+        lines.append("По всем сферам Климова — три шкалы: умение / отношение / желание:")
+        for sp in OPG_SPHERES_ORDER:
+            d = subs[sp]
+            lines.append(
+                f"• {PROFESSION_TYPES[sp]}: умение {d['skill']}/{OPG_MAX_PER_DIM}, "
+                f"отношение {d['att']}/{OPG_MAX_PER_DIM}, желание {d['wish']}/{OPG_MAX_PER_DIM}"
+            )
+        lines.append(
+            "\nСопоставь шкалы: благоприятнее, когда желание и отношение согласуются с умением (см. методичку)."
+        )
+        lines.append(f"\n{CAREER_HINTS_OPG.get(best_key, '')}")
+        send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
+        complete_progress(user_id)
+        save_result(user_id, tid, scores, top3)
+        return
+
     sorted_types = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     if not sorted_types:
         send_message(
@@ -1415,12 +1508,6 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             lines.append(f"{i}. {PROFESSION_TYPES[ptype]} — {points} баллов")
         lines.append(f"\n{CAREER_HINTS_DDO.get(best_key, 'Выбирай направление, которое откликается сильнее.')}")
         lines.append("\nХочешь пройти снова — выбери тест кнопкой или командой.")
-    elif tid == TEST_OPG:
-        lines = [f"📊 Твой результат по «{LABEL_OPG}» (топ-3):"]
-        for i, (code, points) in enumerate(top3, 1):
-            lines.append(f"{i}. {OPG_DIMENSIONS[code]} — {points} баллов")
-        lines.append(f"\n{CAREER_HINTS_OPG.get(best_key, '')}")
-        lines.append("\nРазвивай все четыре стороны готовности — они поддерживают друг друга.")
     elif tid == TEST_JOVASHI:
         lines = [f"📊 Твой результат по «{LABEL_PROF_TABLE}» (топ-3 сферы):"]
         for i, (key, points) in enumerate(top3, 1):
@@ -1617,6 +1704,21 @@ def handle_answer(vk, user_id: int, text: str):
         log_answer_row(sid, user_id, tid, step, text, q_text, ans_label, weights)
     for ptype, value in weights.items():
         scores[ptype] = scores.get(ptype, 0) + value
+    if tid == TEST_OPG:
+        item = qs[step]
+        oi = item.get("opg_item")
+        od = item.get("opg_dim")
+        if oi is not None and od in ("skill", "att", "wish"):
+            meta = scores.get(OPG_META_KEY)
+            if not isinstance(meta, dict):
+                meta = {}
+                scores[OPG_META_KEY] = meta
+            key = str(int(oi))
+            st = meta.get(key)
+            if not isinstance(st, dict):
+                st = {}
+                meta[key] = st
+            st[od] = int(next(iter(weights.values())))
     step += 1
     if step < len(qs):
         save_progress(
