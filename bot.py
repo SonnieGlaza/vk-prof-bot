@@ -53,6 +53,7 @@ KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
 KOT_PATH = os.path.join(_BASE, "kot_questions.json")
 KOT_QUESTION_IMAGE_PATHS: dict[int, str] = {
+    16: os.path.join(_BASE, "assets", "kot_question_17.png"),  # вопрос 17 (шаг 16)
     28: os.path.join(_BASE, "assets", "kot_question_29.png"),  # вопрос 29 (шаг 28)
     31: os.path.join(_BASE, "assets", "kot_question_32.png"),  # вопрос 32 (шаг 31)
     48: os.path.join(_BASE, "assets", "kot_question_49.png"),  # вопрос 49 (шаг 48)
