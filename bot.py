@@ -313,6 +313,7 @@ QUESTIONS_RAVEN = _load_questions(RAVEN_PATH)
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
 EN_LABELS = {"E": "Экстраверсия", "N": "Нейротизм / эмоциональная лабильность"}
+EN57_L_LABEL = "Шкала достоверности ответов (L)"
 
 JOVASHI_SPHERES = {
     "ЛЮДИ": "Сфера работы с людьми",
@@ -348,8 +349,8 @@ WELCOME_TEXT = (
     "• Равен — 12 задач на логику; Прогрессивные матрицы Равена оценивают невербальный интеллект\n"
     "• ЭН - 60 — 30 утверждений «да/нет»; Опросник Айзенка (шкалы E — экстраверсия, N — нейротизм); "
     "удобнее для детей и подростков.\n"
-    "• ЭН - 57 — 24 утверждения «да/нет»; Опросник Айзенка (шкалы E — экстраверсия, N — нейротизм); "
-    "формат ориентирован на взрослых.\n\n"
+    "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
+    "(достоверность ответов); формат ориентирован на взрослых.\n\n"
     "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл, равен, "
     "эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
 )
@@ -396,7 +397,9 @@ def empty_scores(test_id: str) -> dict:
         return {k: 0 for k in KETTELL_TRAITS}
     if tid == TEST_RAVEN:
         return {"LOGIC": 0}
-    if tid in (TEST_EN60, TEST_EN57):
+    if tid == TEST_EN57:
+        return {"E": 0, "N": 0, "L": 0}
+    if tid == TEST_EN60:
         return {k: 0 for k in EN_LABELS}
     return {}
 
@@ -797,11 +800,20 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
         correct = scores.get("LOGIC", 0)
         pct = round(100 * correct / total) if total else 0
         return f"Верных ответов: {correct} из {total} ({pct}%)."
-    if tid in (TEST_EN60, TEST_EN57):
+    if tid == TEST_EN57:
         e = scores.get("E", 0)
         n = scores.get("N", 0)
-        max_e = (len(QUESTIONS_EN60) + 1) // 2 if tid == TEST_EN60 else (len(QUESTIONS_EN57) + 1) // 2
-        max_n = len(QUESTIONS_EN60) // 2 if tid == TEST_EN60 else len(QUESTIONS_EN57) // 2
+        l = scores.get("L", 0)
+        return (
+            f"{EN_LABELS['E']}: {e} из 24.\n"
+            f"{EN_LABELS['N']}: {n} из 24.\n"
+            f"{EN57_L_LABEL}: {l} из 9 (высокий балл — возможная пристрастность к «социально желательным» ответам)."
+        )
+    if tid == TEST_EN60:
+        e = scores.get("E", 0)
+        n = scores.get("N", 0)
+        max_e = (len(QUESTIONS_EN60) + 1) // 2
+        max_n = len(QUESTIONS_EN60) // 2
         return (
             f"{EN_LABELS['E']}: {e} из {max_e} (да).\n"
             f"{EN_LABELS['N']}: {n} из {max_n} (да)."
@@ -1255,23 +1267,33 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             lines.append("\nСредний уровень — полезно тренировать ряды, условия и аккуратность в подсчётах.")
         else:
             lines.append("\nЕсть куда расти — разбирай каждую задачу и ищи закономерность.")
-    elif tid in (TEST_EN60, TEST_EN57):
+    elif tid == TEST_EN57:
         e = scores.get("E", 0)
         n = scores.get("N", 0)
-        max_e = (len(QUESTIONS_EN60) + 1) // 2 if tid == TEST_EN60 else (len(QUESTIONS_EN57) + 1) // 2
-        max_n = len(QUESTIONS_EN60) // 2 if tid == TEST_EN60 else len(QUESTIONS_EN57) // 2
-        label = LABEL_EN60 if tid == TEST_EN60 else LABEL_EN57
-        age_note = (
-            "Удобнее для детей и подростков."
-            if tid == TEST_EN60
-            else "Формат ориентирован на взрослых."
-        )
+        l = scores.get("L", 0)
         lines = [
-            f"📊 Результат «{label}» (ориентир, не клиническая диагностика):",
+            f"📊 Результат «{LABEL_EN57}» / EPI (ориентир, не клиническая диагностика):",
+            f"• {EN_LABELS['E']}: {e} из 24.",
+            f"• {EN_LABELS['N']}: {n} из 24.",
+            f"• {EN57_L_LABEL}: {l} из 9.",
+            "",
+            "Формат ориентирован на взрослых. Шкала L показывает меру «социально желательных» ответов; "
+            "интерпретируй осторожно.",
+            "",
+            "Больше баллов по E — склонность к активности и контактам; по N — сильнее реакция на стресс. "
+            "Обсуди сомнения со специалистом.",
+        ]
+    elif tid == TEST_EN60:
+        e = scores.get("E", 0)
+        n = scores.get("N", 0)
+        max_e = (len(QUESTIONS_EN60) + 1) // 2
+        max_n = len(QUESTIONS_EN60) // 2
+        lines = [
+            f"📊 Результат «{LABEL_EN60}» (ориентир, не клиническая диагностика):",
             f"• {EN_LABELS['E']}: {e} из {max_e} по ответам «да» к соответствующим пунктам.",
             f"• {EN_LABELS['N']}: {n} из {max_n} по ответам «да» к соответствующим пунктам.",
             "",
-            age_note,
+            "Удобнее для детей и подростков.",
             "",
             "Больше «да» по экстраверсии — склонность к активности и контактам; "
             "больше «да» по нейротизму — сильнее реакция на стресс и переживания. "
