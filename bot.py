@@ -52,6 +52,8 @@ YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
 KOT_PATH = os.path.join(_BASE, "kot_questions.json")
+KOT_Q49_IMAGE_PATH = os.path.join(_BASE, "assets", "kot_question_49.png")
+KOT_Q49_STEP_INDEX = 48  # вопрос 49 (нумерация с нуля)
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
@@ -1482,9 +1484,40 @@ def keyboard_for_test(test_id: str, step: int = 0):
     return build_answer_keyboard_binary()
 
 
-def send_message(vk, user_id, message, keyboard=None):
+def send_message(vk, user_id, message, keyboard=None, attachment: str | None = None):
     peer = _peer_id_for_send(user_id)
-    vk.messages.send(peer_id=peer, random_id=0, message=message, keyboard=keyboard)
+    kw: dict = dict(peer_id=peer, random_id=0, message=message, keyboard=keyboard)
+    if attachment:
+        kw["attachment"] = attachment
+    vk.messages.send(**kw)
+
+
+def upload_kot_question_photo(vk, user_id: int) -> str | None:
+    """Загружает PNG к вопросу 49 КОТ; без файла или при ошибке — None."""
+    if not vk or not os.path.isfile(KOT_Q49_IMAGE_PATH):
+        return None
+    try:
+        peer = _peer_id_for_send(user_id)
+        up = VkUpload(vk)
+        ph = up.photo_messages(KOT_Q49_IMAGE_PATH, peer_id=peer)
+        if isinstance(ph, dict):
+            return f"photo{ph['owner_id']}_{ph['id']}"
+        if isinstance(ph, list) and ph:
+            p = ph[0]
+            return f"photo{p['owner_id']}_{p['id']}"
+    except Exception as e:
+        print(f"[upload_kot_question_photo] {e}")
+    return None
+
+
+def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=None):
+    """Текст вопроса + при необходимости вложение (КОТ, вопрос 49 — рисунок с фигурами)."""
+    tid = normalize_test_id(test_id)
+    text = render_question(tid, step)
+    att = None
+    if tid == TEST_KOT and step == KOT_Q49_STEP_INDEX:
+        att = upload_kot_question_photo(vk, user_id)
+    send_message(vk, user_id, text, keyboard=keyboard, attachment=att)
 
 
 def render_question(test_id: str, step: int) -> str:
@@ -1739,7 +1772,8 @@ def start_test(vk, user_id: int, test_id: str):
         last_session_id=session_id,
     )
     intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {len(qs)}."
-    send_message(vk, user_id, f"{intro}\n\n{render_question(tid, 0)}", keyboard=keyboard_for_test(tid, 0))
+    send_message(vk, user_id, intro, keyboard=keyboard_for_test(tid, 0))
+    send_question_message(vk, user_id, tid, 0, keyboard=keyboard_for_test(tid, 0))
 
 
 def send_welcome(vk, user_id: int):
@@ -1779,7 +1813,7 @@ def handle_answer(vk, user_id: int, text: str):
             f"Пожалуйста, используй кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
             keyboard=keyboard_for_test(tid, step),
         )
-        send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
+        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
         return
     scores = progress["scores"]
     opt_val = qs[step]["options"][text]
@@ -1816,7 +1850,7 @@ def handle_answer(vk, user_id: int, text: str):
             status="in_progress",
             last_session_id=sid,
         )
-        send_message(vk, user_id, render_question(tid, step), keyboard=keyboard_for_test(tid, step))
+        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
     else:
         save_progress(
             user_id=user_id,
@@ -2093,10 +2127,11 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         )
         return True
     touch_progress(user_id)
-    send_message(
+    send_question_message(
         vk,
         user_id,
-        render_question(tid, step),
+        tid,
+        step,
         keyboard=keyboard_for_test(tid, step),
     )
     return True
