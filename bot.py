@@ -960,7 +960,15 @@ def incomplete_sessions_row_count() -> int:
 def _top3_from_scores(scores: dict) -> list:
     if not scores:
         return []
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
+    pairs: list[tuple] = []
+    for k, v in scores.items():
+        if k == OPG_META_KEY:
+            continue
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            pairs.append((k, int(v)))
+    return sorted(pairs, key=lambda x: x[1], reverse=True)[:3]
 
 
 def _vk_user_link(user_id: int) -> str:
@@ -1300,7 +1308,7 @@ def save_result(user_id: int, test_id: str, scores: dict, top3: list):
     """Сохраняет результат; учитывает старые БД с колонкой best_area вместо/рядом с best_type."""
     best_type = top3[0][0] if top3 else "Не определено"
     ts = now_ts()
-    scores_json = json.dumps(scores, ensure_ascii=False)
+    scores_json = json.dumps(dict(scores), ensure_ascii=False)
     top3_json = json.dumps(top3, ensure_ascii=False)
     with db_connect() as conn:
         cur = conn.cursor()
