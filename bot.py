@@ -50,6 +50,7 @@ OPG_PATH = os.path.join(_BASE, "opg_questions.json")
 JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
 YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
+KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
 RAVEN_PATH = os.path.join(_BASE, "raven_questions.json")
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
@@ -82,6 +83,7 @@ TEST_OPG = "opg"
 TEST_JOVASHI = "jovashi"
 TEST_YOVASHI = "yovashi"
 TEST_KETTELL = "kettell"
+TEST_KETTELL_16PF_C_YOUTH = "kettell_16pf_c"
 TEST_RAVEN = "raven"
 TEST_EN60 = "en60"
 TEST_EN57 = "en57"
@@ -92,6 +94,7 @@ LABEL_PROF_TABLE = (
     "Таблица для ориентировочного определения предпочтительности типа будущей профессии"
 )
 LABEL_KETTELL = "Кеттелл 16PF"
+LABEL_KETTELL_16PF_C_YOUTH = "Кеттелл 16PF/C (молодёжь)"
 LABEL_RAVEN = "Равен"
 LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
@@ -102,6 +105,7 @@ KB_OPG = "ОПГ"
 KB_PROF_TABLE = "Таблица (ОПТ проф.)"
 KB_YOVASHI = "Йоваши"
 KB_KETTELL = "Кеттелл 16PF"
+KB_KETTELL_16PF_C_YOUTH = "16PF/C (мол.)"
 KB_RAVEN = "Равен"
 KB_EN60 = "ЭН - 60"
 KB_EN57 = "ЭН - 57"
@@ -295,10 +299,12 @@ QUESTIONS_JOVASHI = _load_questions(JOVASHI_PATH)
 QUESTIONS_YOVASHI = _load_questions(YOVASHI_PATH)
 
 QUESTIONS_KETTELL = _load_questions(KETTELL_PATH)
+QUESTIONS_KETTELL_16PF_C_YOUTH = _load_questions(KETTELL_16PF_C_YOUTH_PATH)
 # Порядок первичных факторов 16PF и ориентировочный максимум сырой суммы в этом боте
-# (каждый пункт блока: ответ «а» +1, «б» +0.5 к фактору блока; блоки по границам формы A).
+# (каждый пункт блока: ответ «а» +1, «б» +0.5 к фактору блока).
+# Взрослая форма A: блоки по 12+12+…+11; молодёжная C: 15 блоков по 7 пунктов, фактор Q4 в форме не представлен.
 PF16_ORDER = ["A", "B", "C", "E", "F", "G", "H", "I", "L", "M", "N", "O", "Q1", "Q2", "Q3", "Q4"]
-PF16_BLOCK_MAX: dict[str, float] = {
+PF16_BLOCK_MAX_ADULT: dict[str, float] = {
     "A": 12.0,
     "B": 12.0,
     "C": 12.0,
@@ -316,6 +322,9 @@ PF16_BLOCK_MAX: dict[str, float] = {
     "Q3": 11.0,
     "Q4": 11.0,
 }
+PF16_BLOCK_MAX_YOUTH: dict[str, float] = {c: 7.0 for c in PF16_ORDER if c != "Q4"}
+PF16_BLOCK_MAX_YOUTH["Q4"] = 0.0
+
 KETTELL_TRAITS = {
     "A": "Общительность, открытость (Warmth)",
     "B": "Умственная одарённость, логика (Reasoning)",
@@ -334,8 +343,9 @@ KETTELL_TRAITS = {
     "Q3": "Самоконтроль, перфекционизм (Perfectionism)",
     "Q4": "Напряжённость (Tension)",
 }
+
+QUESTIONS_RAVEN = _load_questions(RAVEN_PATH)
 CAREER_HINTS_KETTELL = {
-    "A": "🤝 Высокие баллы по общительности — команды, обучение, сервис, работа с людьми.",
     "B": "🧩 Блок включает задания на условные связи; для интерпретации IQ-шкалы нужен официальный ключ.",
     "C": "⚖️ Устойчивость помогает в ролях с ответственностью и стрессом; низкие значения — смотреть контекст и самочувствие.",
     "E": "📣 Напористость — лидерство и переговоры; при низкой — роли поддержки и экспертизы.",
@@ -352,8 +362,6 @@ CAREER_HINTS_KETTELL = {
     "Q3": "✅ Перфекционизм — точные профессии; следи за балансом выгорания.",
     "Q4": "⚡ Напряжённость — мониторинг отдыха и стресса.",
 }
-
-QUESTIONS_RAVEN = _load_questions(RAVEN_PATH)
 
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
@@ -390,14 +398,14 @@ WELCOME_TEXT = (
     "3 варианта; сферы интересов: люди, техника, искусство и др.\n"
     "• Йоваши (проф. склонности, модиф. Резапкиной) — 24 вопроса, 3 варианта; выявление преобладающих склонностей "
     "человека к определённым типам профессиональной деятельности.\n"
-    "• Кеттелл 16PF — 187 вопросов, по 3 варианта; методика для взрослых. "
-    "В боте показываются ориентировочные сырые суммы по 16 первичным факторам (не стены и не нормы Publisher).\n"
+    "• Кеттелл 16PF — 187 вопросов для взрослых; ориентировочные суммы по первичным факторам в боте.\n"
+    "• Кеттелл 16PF/C — 105 вопросов для молодёжи; в боте 15 блоков по 7 пунктов (фактор Q4 не входит в форму).\n"
     "• Равен — 12 задач на логику; Прогрессивные матрицы Равена оценивают невербальный интеллект\n"
     "• ЭН - 60 — 60 вопросов «да/нет» для детей и подростков; шкалы E, N и «ложь» (социальная желательность).\n"
     "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
     "(достоверность ответов); формат ориентирован на взрослых.\n\n"
-    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл (16pf), равен, "
-    "эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
+    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, кеттелл (16pf), "
+    "16pf/c (молодёжь), равен, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
 )
 
 
@@ -407,6 +415,13 @@ def normalize_test_id(test_id: str | None) -> str:
     if test_id == LEGACY_HOLLAND:
         return TEST_OPG
     return test_id
+
+
+def _pf16_block_max_map(tid: str) -> dict[str, float]:
+    t = normalize_test_id(tid)
+    if t == TEST_KETTELL_16PF_C_YOUTH:
+        return PF16_BLOCK_MAX_YOUTH
+    return PF16_BLOCK_MAX_ADULT
 
 
 def questions_for(test_id: str):
@@ -421,6 +436,8 @@ def questions_for(test_id: str):
         return QUESTIONS_YOVASHI
     if tid == TEST_KETTELL:
         return QUESTIONS_KETTELL
+    if tid == TEST_KETTELL_16PF_C_YOUTH:
+        return QUESTIONS_KETTELL_16PF_C_YOUTH
     if tid == TEST_RAVEN:
         return QUESTIONS_RAVEN
     if tid == TEST_EN60:
@@ -438,7 +455,7 @@ def empty_scores(test_id: str) -> dict:
         return {k: 0 for k in OPG_DIMENSIONS}
     if tid in (TEST_JOVASHI, TEST_YOVASHI):
         return {k: 0 for k in JOVASHI_SPHERES}
-    if tid == TEST_KETTELL:
+    if tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
         return {k: 0 for k in KETTELL_TRAITS}
     if tid == TEST_RAVEN:
         return {"LOGIC": 0}
@@ -878,24 +895,39 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
         for i, (key, points) in enumerate(top3, 1):
             interp = _interpret_jovashi(points)
             lines.append(f"{i}. {JOVASHI_SPHERES.get(key, key)} — {points} б. ({interp})")
-    elif tid == TEST_KETTELL:
+    elif tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
+        mxmap = _pf16_block_max_map(tid)
+        label = LABEL_KETTELL_16PF_C_YOUTH if tid == TEST_KETTELL_16PF_C_YOUTH else LABEL_KETTELL
+        ranked = sorted(
+            ((k, scores.get(k, 0)) for k in PF16_ORDER if mxmap.get(k, 0) > 0),
+            key=lambda x: x[1],
+            reverse=True,
+        )
         lines = [
-            "Топ-3 по ориентировочной сумме (сырой балл по блоку пункта в боте):",
+            f"Топ-3 по ориентировочной сумме ({label}):",
         ]
-        for i, (key, points) in enumerate(top3, 1):
-            mx = PF16_BLOCK_MAX.get(key, 0)
+        for i, (key, points) in enumerate(ranked[:3], 1):
+            mx = mxmap.get(key, 0)
             short = KETTELL_TRAITS.get(key, key).split("(")[0].strip()
             lines.append(f"{i}. {key} — {short}: {points:g} из {mx:g}")
         lines.append("")
         for code in PF16_ORDER:
+            mx = mxmap.get(code, 0)
+            if mx <= 0:
+                continue
             v = scores.get(code, 0)
-            mx = PF16_BLOCK_MAX[code]
             lines.append(f"{code}: {v:g} из {mx:g}")
         lines.append("")
-        lines.append(
-            "Суммы ориентировочные: пункты сгруппированы по блокам формы A, ответ «а» +1, «б» +0.5 к фактору блока. "
-            "Это не заменяет официальный ключ, стены и нормы издателя 16PF."
-        )
+        if tid == TEST_KETTELL_16PF_C_YOUTH:
+            lines.append(
+                "Суммы ориентировочные: 15 блоков по 7 пунктов (16PF/C для молодёжи в боте), ответ «а» +1, «б» +0.5. "
+                "Фактор Q4 в этой форме не представлен. Не заменяет официальный ключ и нормы Publisher."
+            )
+        else:
+            lines.append(
+                "Суммы ориентировочные: блоки как у формы A в боте, ответ «а» +1, «б» +0.5 к фактору блока. "
+                "Это не заменяет официальный ключ, стены и нормы издателя 16PF."
+            )
     else:
         lines.append(json.dumps(scores, ensure_ascii=False))
     return " ".join(lines) if len(lines) == 1 else "\n".join(lines)
@@ -908,6 +940,7 @@ def _test_title_for_export(test_id: str) -> str:
         TEST_JOVASHI: LABEL_PROF_TABLE,
         TEST_YOVASHI: LABEL_YOVASHI,
         TEST_KETTELL: LABEL_KETTELL,
+        TEST_KETTELL_16PF_C_YOUTH: LABEL_KETTELL_16PF_C_YOUTH,
         TEST_RAVEN: LABEL_RAVEN,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
@@ -1192,6 +1225,8 @@ def build_menu_keyboard():
     kb.add_button(KB_YOVASHI, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
+    kb.add_line()
+    kb.add_button(KB_KETTELL_16PF_C_YOUTH, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_RAVEN, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_EN60, color=VkKeyboardColor.POSITIVE)
@@ -1253,6 +1288,7 @@ def _label_for_test(test_id: str) -> str:
         TEST_JOVASHI: LABEL_PROF_TABLE,
         TEST_YOVASHI: LABEL_YOVASHI,
         TEST_KETTELL: LABEL_KETTELL,
+        TEST_KETTELL_16PF_C_YOUTH: LABEL_KETTELL_16PF_C_YOUTH,
         TEST_RAVEN: LABEL_RAVEN,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
@@ -1304,26 +1340,43 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
         lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
         lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
-    elif tid == TEST_KETTELL:
+    elif tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
+        mxmap = _pf16_block_max_map(tid)
+        disp = LABEL_KETTELL_16PF_C_YOUTH if tid == TEST_KETTELL_16PF_C_YOUTH else LABEL_KETTELL
+        ranked_finish = sorted(
+            ((k, scores.get(k, 0)) for k in PF16_ORDER if mxmap.get(k, 0) > 0),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        top_show = ranked_finish[:3]
         lines = [
-            f"📊 Результат «{LABEL_KETTELL}» (ориентир, не клиническая диагностика):",
+            f"📊 Результат «{disp}» (ориентир, не клиническая диагностика):",
             "",
             "Топ-3 фактора по ориентировочной сумме в боте:",
         ]
-        for i, (key, points) in enumerate(top3, 1):
-            mx = PF16_BLOCK_MAX.get(key, 0)
+        for i, (key, points) in enumerate(top_show, 1):
+            mx = mxmap.get(key, 0)
             lines.append(f"{i}. {KETTELL_TRAITS[key]} — {points:g} из {mx:g}")
         lines.append("")
         lines.append("Все первичные факторы (сырой балл / условный макс. в этом подсчёте):")
         for code in PF16_ORDER:
+            mx = mxmap.get(code, 0)
+            if mx <= 0:
+                continue
             v = scores.get(code, 0)
-            mx = PF16_BLOCK_MAX[code]
             lines.append(f"• {code}: {v:g} из {mx:g}")
-        lines.append(f"\n{CAREER_HINTS_KETTELL.get(best_key, '')}")
-        lines.append(
-            "\nПодсчёт в боте — упрощённый учебный: блоки пунктов как в форме A, без официальной таблицы весов. "
-            "Для решений о лицензии/кадрах используй обработку по методике издателя."
-        )
+        bk = top_show[0][0] if top_show else best_key
+        lines.append(f"\n{CAREER_HINTS_KETTELL.get(bk, '')}")
+        if tid == TEST_KETTELL_16PF_C_YOUTH:
+            lines.append(
+                "\nПодсчёт — упрощённый: 15 блоков по 7 пунктов; фактор Q4 в форме не представлен. "
+                "Используй официальную обработку издателя для норм."
+            )
+        else:
+            lines.append(
+                "\nПодсчёт в боте — упрощённый учебный: блоки пунктов как в форме A, без официальной таблицы весов. "
+                "Для решений о лицензии/кадрах используй обработку по методике издателя."
+            )
     elif tid == TEST_RAVEN:
         total = len(QUESTIONS_RAVEN)
         correct = scores.get("LOGIC", 0)
@@ -1768,6 +1821,10 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("кеттелл", "kettell", "cattell", "16pf", "16пф"):
         start_test(vk, user_id, TEST_KETTELL)
         return True
+    _t_compact = re.sub(r"[\s/_-]+", "", t.lower())
+    if _t_compact in ("16pfc", "16пфс", "kettell16pfc") or ("16pf" in t.lower() and "/c" in stripped.lower()):
+        start_test(vk, user_id, TEST_KETTELL_16PF_C_YOUTH)
+        return True
     if t in ("равен", "raven"):
         start_test(vk, user_id, TEST_RAVEN)
         return True
@@ -1792,6 +1849,9 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         return True
     if stripped == KB_KETTELL:
         start_test(vk, user_id, TEST_KETTELL)
+        return True
+    if stripped == KB_KETTELL_16PF_C_YOUTH:
+        start_test(vk, user_id, TEST_KETTELL_16PF_C_YOUTH)
         return True
     if stripped == KB_RAVEN:
         start_test(vk, user_id, TEST_RAVEN)
