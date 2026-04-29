@@ -1500,10 +1500,12 @@ def render_question(test_id: str, step: int) -> str:
     if n > 6:
         lines.append(f"\nВыбери ответ кнопкой с 1 по {n}.")
     elif n == 6:
+        lines.append("\nВыбери ответ кнопкой 1, 2, 3, 4, 5 или 6.")
+    elif n == 5:
         lines.append("\nВыбери ответ кнопкой 1, 2, 3, 4 или 5.")
-    elif len(keys) == 4:
+    elif n == 4:
         lines.append("\nВыбери ответ кнопкой 1, 2, 3 или 4.")
-    elif len(keys) == 3:
+    elif n == 3:
         lines.append("\nВыбери ответ кнопкой 1, 2 или 3.")
     else:
         lines.append("\nВыбери ответ кнопкой 1 или 2.")
