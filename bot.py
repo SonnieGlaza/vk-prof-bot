@@ -52,8 +52,10 @@ YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
 KOT_PATH = os.path.join(_BASE, "kot_questions.json")
-KOT_Q49_IMAGE_PATH = os.path.join(_BASE, "assets", "kot_question_49.png")
-KOT_Q49_STEP_INDEX = 48  # вопрос 49 (нумерация с нуля)
+KOT_QUESTION_IMAGE_PATHS: dict[int, str] = {
+    31: os.path.join(_BASE, "assets", "kot_question_32.png"),  # вопрос 32 (шаг 31)
+    48: os.path.join(_BASE, "assets", "kot_question_49.png"),  # вопрос 49 (шаг 48)
+}
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
@@ -1492,31 +1494,33 @@ def send_message(vk, user_id, message, keyboard=None, attachment: str | None = N
     vk.messages.send(**kw)
 
 
-def upload_kot_question_photo(vk, user_id: int) -> str | None:
-    """Загружает PNG к вопросу 49 КОТ; без файла или при ошибке — None."""
-    if not vk or not os.path.isfile(KOT_Q49_IMAGE_PATH):
+def upload_vk_photo(vk, user_id: int, image_path: str) -> str | None:
+    """Загружает PNG во вложения сообщений; при ошибке — None."""
+    if not vk or not image_path or not os.path.isfile(image_path):
         return None
     try:
         peer = _peer_id_for_send(user_id)
         up = VkUpload(vk)
-        ph = up.photo_messages(KOT_Q49_IMAGE_PATH, peer_id=peer)
+        ph = up.photo_messages(image_path, peer_id=peer)
         if isinstance(ph, dict):
             return f"photo{ph['owner_id']}_{ph['id']}"
         if isinstance(ph, list) and ph:
             p = ph[0]
             return f"photo{p['owner_id']}_{p['id']}"
     except Exception as e:
-        print(f"[upload_kot_question_photo] {e}")
+        print(f"[upload_vk_photo] {image_path}: {e}")
     return None
 
 
 def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=None):
-    """Текст вопроса + при необходимости вложение (КОТ, вопрос 49 — рисунок с фигурами)."""
+    """Текст вопроса + вложение-картинка для отдельных шагов КОТ."""
     tid = normalize_test_id(test_id)
     text = render_question(tid, step)
     att = None
-    if tid == TEST_KOT and step == KOT_Q49_STEP_INDEX:
-        att = upload_kot_question_photo(vk, user_id)
+    if tid == TEST_KOT:
+        path = KOT_QUESTION_IMAGE_PATHS.get(step)
+        if path:
+            att = upload_vk_photo(vk, user_id, path)
     send_message(vk, user_id, text, keyboard=keyboard, attachment=att)
 
 
