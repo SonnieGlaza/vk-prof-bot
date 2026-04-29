@@ -51,7 +51,7 @@ JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
 YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
-RAVEN_PATH = os.path.join(_BASE, "raven_questions.json")
+KOT_PATH = os.path.join(_BASE, "kot_questions.json")
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
@@ -85,7 +85,8 @@ TEST_JOVASHI = "jovashi"
 TEST_YOVASHI = "yovashi"
 TEST_KETTELL = "kettell"
 TEST_KETTELL_16PF_C_YOUTH = "kettell_16pf_c"
-TEST_RAVEN = "raven"
+TEST_KOT = "kot"
+LEGACY_RAVEN = "raven"
 TEST_EN60 = "en60"
 TEST_EN57 = "en57"
 TEST_HOLLAND_RIASEC = "holland_riasec"
@@ -97,7 +98,7 @@ LABEL_PROF_TABLE = (
 )
 LABEL_KETTELL = "Кеттелл 16PF"
 LABEL_KETTELL_16PF_C_YOUTH = "Кеттелл 16PF/C (молодёжь)"
-LABEL_RAVEN = "Равен"
+LABEL_KOT = "КОТ (краткий ориентировочный тест)"
 LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
 LABEL_HOLLAND = "Голланд (RIASEC, пары профессий)"
@@ -109,7 +110,7 @@ KB_PROF_TABLE = "Таблица (ОПТ проф.)"
 KB_YOVASHI = "Йоваши"
 KB_KETTELL = "Кеттелл 16PF"
 KB_KETTELL_16PF_C_YOUTH = "16PF/C (мол.)"
-KB_RAVEN = "Равен"
+KB_KOT = "КОТ"
 KB_EN60 = "ЭН - 60"
 KB_EN57 = "ЭН - 57"
 KB_HOLLAND = "Голланд"
@@ -403,7 +404,7 @@ KETTELL_TRAITS = {
     "Q4": "Напряжённость (Tension)",
 }
 
-QUESTIONS_RAVEN = _load_questions(RAVEN_PATH)
+QUESTIONS_KOT = _load_questions(KOT_PATH)
 CAREER_HINTS_KETTELL = {
     "B": "🧩 Блок включает задания на условные связи; для интерпретации IQ-шкалы нужен официальный ключ.",
     "C": "⚖️ Устойчивость помогает в ролях с ответственностью и стрессом; низкие значения — смотреть контекст и самочувствие.",
@@ -511,13 +512,14 @@ WELCOME_TEXT = (
     "человека к определённым типам профессиональной деятельности.\n"
     "• Кеттелл 16PF — 187 вопросов для взрослых; ориентировочные суммы по первичным факторам в боте.\n"
     "• Кеттелл 16PF/C — 105 вопросов для молодёжи; в боте 15 блоков по 7 пунктов (фактор Q4 не входит в форму).\n"
-    "• Равен — 60 учебных задач на логику (текстовый аналог; не оригинальные матрицы ПМР).\n"
+    "• КОТ — краткий ориентировочный тест (логика, словарь, внимание, ориентировочные задачи; часть пунктов с чертежами в оригинале "
+    "заменена текстовыми подсказками в боте).\n"
     "• ЭН - 60 — 60 вопросов «да/нет» для детей и подростков; шкалы E, N и «ложь» (социальная желательность).\n"
     "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
     "(достоверность ответов); формат ориентирован на взрослых.\n"
     "• Голланд (RIASEC) — 42 пары профессий (вариант А / В); шесть типов предпочтений по ключу из методички.\n\n"
     "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, голланд, кеттелл (16pf), "
-    "16pf/c (молодёжь), равен, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
+    "16pf/c (молодёжь), кот, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
 )
 
 
@@ -526,6 +528,8 @@ def normalize_test_id(test_id: str | None) -> str:
         return TEST_DDO
     if test_id == LEGACY_HOLLAND:
         return TEST_HOLLAND_RIASEC
+    if test_id == LEGACY_RAVEN:
+        return TEST_KOT
     return test_id
 
 
@@ -550,8 +554,8 @@ def questions_for(test_id: str):
         return QUESTIONS_KETTELL
     if tid == TEST_KETTELL_16PF_C_YOUTH:
         return QUESTIONS_KETTELL_16PF_C_YOUTH
-    if tid == TEST_RAVEN:
-        return QUESTIONS_RAVEN
+    if tid == TEST_KOT:
+        return QUESTIONS_KOT
     if tid == TEST_EN60:
         return QUESTIONS_EN60
     if tid == TEST_EN57:
@@ -573,7 +577,7 @@ def empty_scores(test_id: str) -> dict:
         return {k: 0 for k in JOVASHI_SPHERES}
     if tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
         return {k: 0 for k in KETTELL_TRAITS}
-    if tid == TEST_RAVEN:
+    if tid == TEST_KOT:
         return {"LOGIC": 0}
     if tid == TEST_EN57:
         return {"E": 0, "N": 0, "L": 0}
@@ -680,6 +684,22 @@ def init_db():
         cur.execute(
             "UPDATE answer_log SET test_id=? WHERE test_id=?",
             (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
+        )
+        cur.execute(
+            "UPDATE user_progress SET test_id=? WHERE test_id=?",
+            (TEST_KOT, LEGACY_RAVEN),
+        )
+        cur.execute(
+            "UPDATE test_results SET test_id=? WHERE test_id=?",
+            (TEST_KOT, LEGACY_RAVEN),
+        )
+        cur.execute(
+            "UPDATE test_sessions SET test_id=? WHERE test_id=?",
+            (TEST_KOT, LEGACY_RAVEN),
+        )
+        cur.execute(
+            "UPDATE answer_log SET test_id=? WHERE test_id=?",
+            (TEST_KOT, LEGACY_RAVEN),
         )
         conn.commit()
 
@@ -799,6 +819,18 @@ def get_progress(user_id: int):
             save_progress(
                 user_id=user_id,
                 test_id=TEST_HOLLAND_RIASEC,
+                step=step,
+                scores=scores,
+                status=status,
+                reminder_pending=rp,
+                last_session_id=lsid,
+            )
+        if tid == TEST_KOT and step >= len(QUESTIONS_KOT):
+            scores = empty_scores(TEST_KOT)
+            step = 0
+            save_progress(
+                user_id=user_id,
+                test_id=TEST_KOT,
                 step=step,
                 scores=scores,
                 status=status,
@@ -1011,8 +1043,8 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
     if not scores:
         return ""
     lines: list[str] = []
-    if tid == TEST_RAVEN:
-        total = len(QUESTIONS_RAVEN)
+    if tid == TEST_KOT:
+        total = len(QUESTIONS_KOT)
         correct = scores.get("LOGIC", 0)
         pct = round(100 * correct / total) if total else 0
         return f"Верных ответов: {correct} из {total} ({pct}%)."
@@ -1113,7 +1145,7 @@ def _test_title_for_export(test_id: str) -> str:
         TEST_YOVASHI: LABEL_YOVASHI,
         TEST_KETTELL: LABEL_KETTELL,
         TEST_KETTELL_16PF_C_YOUTH: LABEL_KETTELL_16PF_C_YOUTH,
-        TEST_RAVEN: LABEL_RAVEN,
+        TEST_KOT: LABEL_KOT,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
         TEST_HOLLAND_RIASEC: LABEL_HOLLAND,
@@ -1381,6 +1413,30 @@ def build_answer_keyboard_quad():
     return kb.get_keyboard()
 
 
+def build_answer_keyboard_five():
+    kb = VkKeyboard(one_time=False, inline=True)
+    for i in range(1, 6):
+        kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
+    return kb.get_keyboard()
+
+
+def build_answer_keyboard_six():
+    kb = VkKeyboard(one_time=False, inline=True)
+    for i in range(1, 7):
+        kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
+    return kb.get_keyboard()
+
+
+def build_answer_keyboard_many(n: int):
+    """Кнопки 1..n в рядах по 5 (для задач с числовым выбором)."""
+    kb = VkKeyboard(one_time=False, inline=True)
+    for i in range(1, n + 1):
+        kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
+        if i % 5 == 0 and i < n:
+            kb.add_line()
+    return kb.get_keyboard()
+
+
 def build_reminder_continue_keyboard():
     kb = VkKeyboard(one_time=False, inline=True)
     kb.add_button("Да", color=VkKeyboardColor.POSITIVE)
@@ -1401,7 +1457,7 @@ def build_menu_keyboard():
     kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_KETTELL_16PF_C_YOUTH, color=VkKeyboardColor.POSITIVE)
-    kb.add_button(KB_RAVEN, color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_KOT, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_EN60, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_EN57, color=VkKeyboardColor.POSITIVE)
@@ -1414,7 +1470,13 @@ def keyboard_for_test(test_id: str, step: int = 0):
     tid = normalize_test_id(test_id)
     qs = questions_for(tid)
     nopts = len(qs[step]["options"]) if step < len(qs) else 2
-    if nopts >= 4:
+    if nopts > 6:
+        return build_answer_keyboard_many(nopts)
+    if nopts == 6:
+        return build_answer_keyboard_six()
+    if nopts == 5:
+        return build_answer_keyboard_five()
+    if nopts == 4:
         return build_answer_keyboard_quad()
     if nopts == 3:
         return build_answer_keyboard_jovashi()
@@ -1435,7 +1497,12 @@ def render_question(test_id: str, step: int) -> str:
         opt = item["options"][key]
         label = opt[0] if isinstance(opt[0], str) else str(opt[0])
         lines.append(f"{key}) {label}")
-    if len(keys) == 4:
+    n = len(keys)
+    if n > 6:
+        lines.append(f"\nВыбери ответ кнопкой с 1 по {n}.")
+    elif n == 6:
+        lines.append("\nВыбери ответ кнопкой 1, 2, 3, 4 или 5.")
+    elif len(keys) == 4:
         lines.append("\nВыбери ответ кнопкой 1, 2, 3 или 4.")
     elif len(keys) == 3:
         lines.append("\nВыбери ответ кнопкой 1, 2 или 3.")
@@ -1463,7 +1530,7 @@ def _label_for_test(test_id: str) -> str:
         TEST_YOVASHI: LABEL_YOVASHI,
         TEST_KETTELL: LABEL_KETTELL,
         TEST_KETTELL_16PF_C_YOUTH: LABEL_KETTELL_16PF_C_YOUTH,
-        TEST_RAVEN: LABEL_RAVEN,
+        TEST_KOT: LABEL_KOT,
         TEST_EN60: LABEL_EN60,
         TEST_EN57: LABEL_EN57,
         TEST_HOLLAND_RIASEC: LABEL_HOLLAND,
@@ -1576,22 +1643,22 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
                 "\nПодсчёт в боте — упрощённый учебный: блоки пунктов как в форме A, без официальной таблицы весов. "
                 "Для решений о лицензии/кадрах используй обработку по методике издателя."
             )
-    elif tid == TEST_RAVEN:
-        total = len(QUESTIONS_RAVEN)
+    elif tid == TEST_KOT:
+        total = len(QUESTIONS_KOT)
         correct = scores.get("LOGIC", 0)
         pct = round(100 * correct / total) if total else 0
         lines = [
-            f"📊 Результат «{LABEL_RAVEN}»: {correct} из {total} верных ({pct}%).",
+            f"📊 Результат «{LABEL_KOT}»: {correct} из {total} верных ({pct}%).",
             "",
-            "Задачи учебные (аналог по формату), без оригинальных таблиц Равена. "
-            "Используй как тренировку внимательности и логики.",
+            "КОТ — ориентировочный тест общих способностей (из учебных сборников). В боте нет чертежей из бланка: "
+            "пункты с рисунками заменены на текстовые варианты для самопроверки.",
         ]
         if pct >= 75:
-            lines.append("\nСильный результат — продолжай решать подобные задачи и разбирать ошибки.")
+            lines.append("\nСильный результат — продолжай тренировать внимание и логику на разных типах заданий.")
         elif pct >= 50:
-            lines.append("\nСредний уровень — полезно тренировать ряды, условия и аккуратность в подсчётах.")
+            lines.append("\nСредний уровень — полезно разбирать ошибки и возвращаться к пунктам с вычислениями.")
         else:
-            lines.append("\nЕсть куда расти: разбирай каждую задачу и ищи закономерность.")
+            lines.append("\nЕсть куда расти: разбирай каждое задание и закрепляй термины и приёмы счёта.")
     elif tid == TEST_EN57:
         e = scores.get("E", 0)
         n = scores.get("N", 0)
@@ -2065,8 +2132,8 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if _t_compact in ("16pfc", "16пфс", "kettell16pfc") or ("16pf" in t.lower() and "/c" in stripped.lower()):
         start_test(vk, user_id, TEST_KETTELL_16PF_C_YOUTH)
         return True
-    if t in ("равен", "raven"):
-        start_test(vk, user_id, TEST_RAVEN)
+    if t in ("кот", "kot"):
+        start_test(vk, user_id, TEST_KOT)
         return True
     if t.replace(" ", "") in ("эн-60", "эн60", "en-60", "en60"):
         start_test(vk, user_id, TEST_EN60)
@@ -2096,8 +2163,8 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if stripped == KB_KETTELL_16PF_C_YOUTH:
         start_test(vk, user_id, TEST_KETTELL_16PF_C_YOUTH)
         return True
-    if stripped == KB_RAVEN:
-        start_test(vk, user_id, TEST_RAVEN)
+    if stripped == KB_KOT:
+        start_test(vk, user_id, TEST_KOT)
         return True
     if stripped == KB_EN60:
         start_test(vk, user_id, TEST_EN60)
