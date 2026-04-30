@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import openpyxl
 import requests
@@ -987,17 +987,72 @@ def is_stats_admin(vk, user_id: int) -> bool:
     return ok
 
 
-def test_results_row_count() -> int:
+MSK_TZ = timezone(timedelta(hours=3))
+
+
+def _msk_day_start_end_ts() -> tuple[int, int]:
+    """Границы текущих календарных суток в часовом поясе Москвы (unix)."""
+    now = datetime.now(MSK_TZ)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return int(start.timestamp()), int(end.timestamp())
+
+
+def _parse_stats_export_period(text: str) -> tuple[str, int | None, int | None]:
+    """
+    Период выгрузки из текста сообщения.
+    По умолчанию — всё время (все строки в базе без фильтра по дате).
+    «Сегодня» / «за сегодня» — только записи за текущие сутки по МСК.
+    Возвращает (метка, since_ts, until_ts); until — невключительно.
+    """
+    blob = " ".join(
+        _strip_command_text(line)
+        for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if _strip_command_text(line)
+    ).lower()
+    if not blob:
+        return "all", None, None
+    day_tokens = (
+        "сегодня",
+        "за сегодня",
+        "за день",
+        "за текущие сутки",
+        "только за сегодня",
+        "today",
+        "for today",
+    )
+    if any(tok in blob for tok in day_tokens):
+        a, b = _msk_day_start_end_ts()
+        return "today_msk", a, b
+    return "all", None, None
+
+
+def test_results_row_count_filtered(since: int | None, until: int | None) -> int:
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM test_results")
+        if since is None or until is None:
+            cur.execute("SELECT COUNT(*) FROM test_results")
+        else:
+            cur.execute(
+                "SELECT COUNT(*) FROM test_results WHERE finished_at >= ? AND finished_at < ?",
+                (since, until),
+            )
         return int(cur.fetchone()[0])
 
 
-def incomplete_sessions_row_count() -> int:
+def incomplete_sessions_row_count_filtered(since: int | None, until: int | None) -> int:
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM test_sessions WHERE status != 'completed'")
+        if since is None or until is None:
+            cur.execute("SELECT COUNT(*) FROM test_sessions WHERE status != 'completed'")
+        else:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM test_sessions
+                WHERE status != 'completed' AND started_at >= ? AND started_at < ?
+                """,
+                (since, until),
+            )
         return int(cur.fetchone()[0])
 
 
@@ -1157,7 +1212,7 @@ def _test_title_for_export(test_id: str) -> str:
     }.get(test_id, test_id)
 
 
-def build_stats_excel_bytes(vk) -> bytes:
+def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = None) -> bytes:
     headers = [
         "№ (новый пользователь — новый номер)",
         "Ссылка на пользователя",
@@ -1173,22 +1228,44 @@ def build_stats_excel_bytes(vk) -> bytes:
     ws.append(headers)
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, user_id, test_id, finished_at, scores_json, top3_json
-            FROM test_results
-            ORDER BY finished_at ASC, id ASC
-            """
-        )
+        if since is None or until is None:
+            cur.execute(
+                """
+                SELECT id, user_id, test_id, finished_at, scores_json, top3_json
+                FROM test_results
+                ORDER BY finished_at ASC, id ASC
+                """
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, user_id, test_id, finished_at, scores_json, top3_json
+                FROM test_results
+                WHERE finished_at >= ? AND finished_at < ?
+                ORDER BY finished_at ASC, id ASC
+                """,
+                (since, until),
+            )
         result_rows = cur.fetchall()
-        cur.execute(
-            """
-            SELECT id, user_id, test_id, started_at, status, final_scores_json
-            FROM test_sessions
-            WHERE status != 'completed'
-            ORDER BY started_at ASC, id ASC
-            """
-        )
+        if since is None or until is None:
+            cur.execute(
+                """
+                SELECT id, user_id, test_id, started_at, status, final_scores_json
+                FROM test_sessions
+                WHERE status != 'completed'
+                ORDER BY started_at ASC, id ASC
+                """
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, user_id, test_id, started_at, status, final_scores_json
+                FROM test_sessions
+                WHERE status != 'completed' AND started_at >= ? AND started_at < ?
+                ORDER BY started_at ASC, id ASC
+                """,
+                (since, until),
+            )
         session_rows = cur.fetchall()
         session_ids = [int(r[0]) for r in session_rows]
         answer_counts: dict[int, int] = {}
@@ -1293,11 +1370,28 @@ def build_stats_excel_bytes(vk) -> bytes:
     return bio.getvalue()
 
 
-def send_stats_export(vk, user_id: int):
-    n_done = test_results_row_count()
-    n_open = incomplete_sessions_row_count()
-    data = build_stats_excel_bytes(vk)
-    fname = f"stats_answers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+def send_stats_export(
+    vk,
+    user_id: int,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    period_label: str = "all",
+):
+    period_label = period_label or "all"
+    if period_label == "today_msk":
+        n_done = test_results_row_count_filtered(since, until)
+        n_open = incomplete_sessions_row_count_filtered(since, until)
+        period_human = "за сегодня (МСК)"
+    else:
+        n_done = test_results_row_count_filtered(None, None)
+        n_open = incomplete_sessions_row_count_filtered(None, None)
+        since, until = None, None
+        period_human = "за всё время (все записи в базе)"
+
+    data = build_stats_excel_bytes(vk, since=since, until=until)
+    suffix = "today_msk" if period_label == "today_msk" else "all_time"
+    fname = f"stats_answers_{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
     bio.name = fname
     upload = VkUpload(vk)
@@ -1311,11 +1405,12 @@ def send_stats_export(vk, user_id: int):
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
     note = (
-        f"Excel: строки = завершённые тесты ({n_done}) + незавершённые сессии ({n_open}). "
+        f"Excel ({period_human}): строки = завершённые тесты ({n_done}) + незавершённые сессии ({n_open}). "
         "Колонка C — имя и фамилия из ВК (если токен не смог получить профиль, ячейка пустая). "
         "Колонка «№» — порядковый номер пользователя (первое появление vk id в общей хронологии строк = новый номер). "
         "Для незавершённых в «Дата» — время старта сессии; в «Итоги» — сколько шагов отвечено. "
-        "Пошаговые ответы в файл не выгружаются."
+        "Пошаговые ответы в файл не выгружаются.\n"
+        "Период: по умолчанию — всё время; только за сегодня (МСК) — добавь в сообщение фразу «сегодня» или «за сегодня»."
     )
     vk.messages.send(
         peer_id=peer,
@@ -1325,7 +1420,7 @@ def send_stats_export(vk, user_id: int):
     )
 
 
-def handle_stats_command(vk, user_id: int) -> bool:
+def handle_stats_command(vk, user_id: int, text: str) -> bool:
     if not is_stats_admin(vk, user_id):
         send_message(
             vk,
@@ -1333,11 +1428,19 @@ def handle_stats_command(vk, user_id: int) -> bool:
             "Выгрузка только для администраторов.\n\n"
             "Сделай так: открой Railway → твой сервис → Variables → добавь STATS_ADMIN_IDS = твой числовой id ВК "
             "(только цифры, без пробелов). Id смотри в ссылке на страницу vk.com/id… или через настройки. "
-            "Сохрани и Redeploy. Потом напиши боту одно слово: выгрузка",
+            "Сохрани и Redeploy. Потом напиши боту одно слово: выгрузка или /stats — в таблицу попадут все данные за всё время. "
+            "Только за сегодня (по Москве) — добавь в сообщение «сегодня» или «за сегодня».",
         )
         return True
     try:
-        send_stats_export(vk, user_id)
+        period_label, since_ts, until_ts = _parse_stats_export_period(text)
+        send_stats_export(
+            vk,
+            user_id,
+            since=since_ts,
+            until=until_ts,
+            period_label=period_label,
+        )
     except Exception as e:
         print(f"[handle_stats_command] {e}")
         send_message(
@@ -2148,7 +2251,7 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     stripped = _strip_command_text(text)
     t = _normalize_cmd(stripped)
     if _wants_stats_export(text):
-        return handle_stats_command(vk, user_id)
+        return handle_stats_command(vk, user_id, text)
     if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
         send_welcome(vk, user_id)
         return True
