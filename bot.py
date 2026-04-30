@@ -292,14 +292,53 @@ def _load_questions(path: str):
         return json.load(_f)
 
 
-# --- ОПГ (опросник профессиональной готовности): 50 высказываний, по 3 балла (умение, отношение, желание) → 150 шагов в боте;
+# --- ОПГ (опросник профессиональной готовности): 50 «вопросов» в боте; на каждое высказывание три оценки (умение, отношение, желание).
+# В JSON — 150 плоских карточек; шаг прогресса 0…49 и __opg_flow["part"] 0…2 выбирают карточку step*3+part.
 # столбцы бланка Ч-З / Ч-Т / Ч-П / Ч-Х / Ч-Ч — номера 1…50 по диагонали бланка (как на testoteka.narod.ru).
 OPG_SPHERES_ORDER = ["Ч-З", "Ч-Т", "Ч-П", "Ч-Х", "Ч-Ч"]
 OPG_ITEM_COUNT = 50
 OPG_MAX_PER_DIM = OPG_ITEM_COUNT // len(OPG_SPHERES_ORDER) * 2  # 10 пунктов в столбце × 2 балла
 OPG_META_KEY = "__opg_meta"
+OPG_FLOW_KEY = "__opg_flow"
+OPG_FLOW_VER = 2
 
 QUESTIONS_OPG = _load_questions(OPG_PATH)
+
+
+def _opg_flat_len() -> int:
+    return len(QUESTIONS_OPG)
+
+
+def _opg_effective_question_count(test_id: str) -> int:
+    tid = normalize_test_id(test_id)
+    if tid == TEST_OPG:
+        return OPG_ITEM_COUNT
+    return len(questions_for(tid))
+
+
+def _opg_ensure_flow(scores: dict) -> dict:
+    f = scores.get(OPG_FLOW_KEY)
+    if not isinstance(f, dict):
+        f = {}
+        scores[OPG_FLOW_KEY] = f
+    if int(f.get("ver", 0) or 0) != OPG_FLOW_VER:
+        f["ver"] = OPG_FLOW_VER
+    part = int(f.get("part", 0) or 0)
+    if part not in (0, 1, 2):
+        part = 0
+        f["part"] = 0
+    return f
+
+
+def _opg_flat_index(step: int, scores: dict) -> int:
+    f = _opg_ensure_flow(scores)
+    part = int(f.get("part", 0) or 0)
+    return int(step) * 3 + part
+
+
+def _opg_scores_storable(scores: dict) -> dict:
+    """Без служебного __opg_flow — не пишем в итог сессии / test_results."""
+    return {k: v for k, v in scores.items() if k != OPG_FLOW_KEY}
 
 
 def _opg_sphere_for_item(n: int) -> str:
@@ -509,9 +548,9 @@ WELCOME_TEXT = (
     "Доступные тесты:\n"
     "• ДДО (дифференциально-диагностический опросник Климова) — 20 пар занятий, выбери одно; "
     "покажет склонность к типам «человек–природа», «человек–техника» и др.\n"
-    "• ОПГ (опросник профессиональной готовности) — 50 высказываний; на каждое три вопроса с баллами 0–2 "
+    "• ОПГ (опросник профессиональной готовности) — 50 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
     "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
-    "В боте 150 шагов; столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делал(а) — в бланке прочерки на умение и отношение; "
+    "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делал(а) — в бланке прочерки на умение и отношение; "
     "в боте на умение выбери «0 — делаю плохо», тогда отношение и желание в сумму не войдут.\n"
     "• ОПТ (Таблица для ориентировочного определения предпочтительности типа будущей профессии) — 24 вопроса, "
     "3 варианта; сферы интересов: люди, техника, искусство и др.\n"
@@ -577,6 +616,7 @@ def empty_scores(test_id: str) -> dict:
     if tid == TEST_OPG:
         base = {k: 0 for k in _opg_score_keys()}
         base[OPG_META_KEY] = {}
+        base[OPG_FLOW_KEY] = {"ver": OPG_FLOW_VER, "part": 0}
         return base
     if tid in (TEST_JOVASHI, TEST_YOVASHI):
         return {k: 0 for k in JOVASHI_SPHERES}
@@ -805,10 +845,10 @@ def get_progress(user_id: int):
         rp = int(reminder_pending or 0)
         lsid = int(last_session_id) if last_session_id is not None else None
         if tid == TEST_OPG and scores:
-            need = set(_opg_score_keys()) | {OPG_META_KEY}
+            base_need = set(_opg_score_keys()) | {OPG_META_KEY}
             meta = scores.get(OPG_META_KEY)
             legacy = any(x in scores for x in ("ПОЗ", "ЭМО", "ДЕЯ", "КОМ"))
-            if legacy or not need <= set(scores.keys()) or not isinstance(meta, dict):
+            if legacy or not base_need <= set(scores.keys()) or not isinstance(meta, dict):
                 scores = empty_scores(TEST_OPG)
                 step = 0
                 save_progress(
@@ -820,6 +860,47 @@ def get_progress(user_id: int):
                     reminder_pending=rp,
                     last_session_id=lsid,
                 )
+            else:
+                flow = _opg_ensure_flow(scores)
+                fv = int(flow.get("ver", 0) or 0)
+                istep = int(step)
+                expected_flat = OPG_ITEM_COUNT * 3
+                if status == "completed" and istep == OPG_ITEM_COUNT:
+                    flow["ver"] = OPG_FLOW_VER
+                    flow["part"] = 0
+                elif fv < OPG_FLOW_VER:
+                    if status == "completed" and istep >= expected_flat:
+                        step = OPG_ITEM_COUNT
+                        flow["part"] = 0
+                    elif istep >= expected_flat:
+                        scores = empty_scores(TEST_OPG)
+                        step = 0
+                    else:
+                        step = min(istep // 3, OPG_ITEM_COUNT - 1)
+                        flow["part"] = istep % 3
+                    flow["ver"] = OPG_FLOW_VER
+                    save_progress(
+                        user_id=user_id,
+                        test_id=TEST_OPG,
+                        step=step,
+                        scores=scores,
+                        status=status,
+                        reminder_pending=rp,
+                        last_session_id=lsid,
+                    )
+                else:
+                    if istep > OPG_ITEM_COUNT or (istep == OPG_ITEM_COUNT and status != "completed"):
+                        scores = empty_scores(TEST_OPG)
+                        step = 0
+                        save_progress(
+                            user_id=user_id,
+                            test_id=TEST_OPG,
+                            step=step,
+                            scores=scores,
+                            status=status,
+                            reminder_pending=rp,
+                            last_session_id=lsid,
+                        )
         if tid == TEST_HOLLAND_RIASEC and scores and not set(scores.keys()) <= set(HOLLAND_ORDER):
             scores = empty_scores(TEST_HOLLAND_RIASEC)
             step = 0
@@ -1063,7 +1144,7 @@ def _top3_from_scores(scores: dict) -> list:
         return []
     pairs: list[tuple] = []
     for k, v in scores.items():
-        if k == OPG_META_KEY:
+        if k == OPG_META_KEY or k == OPG_FLOW_KEY:
             continue
         if isinstance(v, bool):
             continue
@@ -1352,7 +1433,7 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
             sid = int(sid_maybe) if sid_maybe is not None else 0
             n_ans = answer_counts.get(sid, 0)
             try:
-                total_q = len(questions_for(tid))
+                total_q = _opg_effective_question_count(tid)
             except Exception:
                 total_q = 0
             parts = [f"Сессия {sid}, {status_ru}. Отвечено шагов: {n_ans}" + (f" из {total_q}." if total_q else ".")]
@@ -1576,10 +1657,14 @@ def build_menu_keyboard():
     return kb.get_keyboard()
 
 
-def keyboard_for_test(test_id: str, step: int = 0):
+def keyboard_for_test(test_id: str, step: int = 0, scores: dict | None = None):
     tid = normalize_test_id(test_id)
     qs = questions_for(tid)
-    nopts = len(qs[step]["options"]) if step < len(qs) else 2
+    if tid == TEST_OPG and scores is not None:
+        idx = _opg_flat_index(step, scores)
+        nopts = len(qs[idx]["options"]) if 0 <= idx < len(qs) else 2
+    else:
+        nopts = len(qs[step]["options"]) if step < len(qs) else 2
     if nopts > 6:
         return build_answer_keyboard_many(nopts)
     if nopts == 6:
@@ -1619,10 +1704,10 @@ def upload_vk_photo(vk, user_id: int, image_path: str) -> str | None:
     return None
 
 
-def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=None):
+def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=None, scores: dict | None = None):
     """Текст вопроса + вложение-картинка для отдельных шагов КОТ."""
     tid = normalize_test_id(test_id)
-    text = render_question(tid, step)
+    text = render_question(tid, step, scores)
     att = None
     if tid == TEST_KOT:
         path = KOT_QUESTION_IMAGE_PATHS.get(step)
@@ -1631,9 +1716,14 @@ def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=No
     send_message(vk, user_id, text, keyboard=keyboard, attachment=att)
 
 
-def render_question(test_id: str, step: int) -> str:
+def render_question(test_id: str, step: int, scores: dict | None = None) -> str:
     tid = normalize_test_id(test_id)
-    item = questions_for(tid)[step]
+    qs = questions_for(tid)
+    if tid == TEST_OPG and scores is not None:
+        idx = _opg_flat_index(step, scores)
+        item = qs[idx] if 0 <= idx < len(qs) else qs[min(step, len(qs) - 1)]
+    else:
+        item = qs[step]
     lines = [item["q"]]
     keys = sorted(item["options"].keys(), key=lambda x: int(x))
     for key in keys:
@@ -1686,8 +1776,9 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     tid = normalize_test_id(test_id)
     prog = get_progress(user_id)
     sid = prog.get("last_session_id") if prog else None
+    store_scores = _opg_scores_storable(scores) if tid == TEST_OPG else scores
     if sid:
-        complete_test_session(sid, user_id, scores, "completed")
+        complete_test_session(sid, user_id, store_scores, "completed")
     if tid == TEST_OPG:
         ranked_wish, subs = _opg_finish_totals(scores)
         top3 = ranked_wish[:3]
@@ -1715,7 +1806,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         lines.append(POST_TEST_REFERRAL_TRUDVSEM)
         send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
         complete_progress(user_id)
-        save_result(user_id, tid, scores, top3)
+        save_result(user_id, tid, store_scores, top3)
         return
 
     sorted_types = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -1866,12 +1957,11 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     lines.append(POST_TEST_REFERRAL_TRUDVSEM)
     send_message(vk, user_id, "\n".join(lines), keyboard=build_menu_keyboard())
     complete_progress(user_id)
-    save_result(user_id, tid, scores, top3)
+    save_result(user_id, tid, store_scores, top3)
 
 
 def start_test(vk, user_id: int, test_id: str):
     tid = normalize_test_id(test_id)
-    qs = questions_for(tid)
     scores = empty_scores(tid)
     session_id = create_test_session(user_id, tid)
     save_progress(
@@ -1882,9 +1972,18 @@ def start_test(vk, user_id: int, test_id: str):
         status="in_progress",
         last_session_id=session_id,
     )
-    intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {len(qs)}."
-    send_message(vk, user_id, intro, keyboard=keyboard_for_test(tid, 0))
-    send_question_message(vk, user_id, tid, 0, keyboard=keyboard_for_test(tid, 0))
+    nq = _opg_effective_question_count(tid)
+    intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {nq}."
+    _kb_scores = scores if tid == TEST_OPG else None
+    send_message(vk, user_id, intro, keyboard=keyboard_for_test(tid, 0, _kb_scores))
+    send_question_message(
+        vk,
+        user_id,
+        tid,
+        0,
+        keyboard=keyboard_for_test(tid, 0, _kb_scores),
+        scores=_kb_scores,
+    )
 
 
 def send_welcome(vk, user_id: int):
@@ -1913,31 +2012,61 @@ def handle_answer(vk, user_id: int, text: str):
     touch_progress(user_id)
     step = progress["step"]
     qs = questions_for(tid)
-    if step >= len(qs):
-        finish_test(vk, user_id, tid, progress["scores"])
+    scores = progress["scores"]
+    _kb_scores = scores if tid == TEST_OPG else None
+
+    if tid == TEST_OPG:
+        if step >= OPG_ITEM_COUNT:
+            finish_test(vk, user_id, tid, scores)
+            return
+        flat_i = _opg_flat_index(step, scores)
+    else:
+        if step >= len(qs):
+            finish_test(vk, user_id, tid, scores)
+            return
+        flat_i = step
+
+    if flat_i >= len(qs):
+        finish_test(vk, user_id, tid, scores)
         return
-    valid = set(qs[step]["options"].keys())
+
+    valid = set(qs[flat_i]["options"].keys())
     if text not in valid:
         send_message(
             vk,
             user_id,
             f"Пожалуйста, используй кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
-            keyboard=keyboard_for_test(tid, step),
+            keyboard=keyboard_for_test(tid, step, _kb_scores),
         )
-        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
+        send_question_message(
+            vk,
+            user_id,
+            tid,
+            step,
+            keyboard=keyboard_for_test(tid, step, _kb_scores),
+            scores=_kb_scores,
+        )
         return
-    scores = progress["scores"]
-    opt_val = qs[step]["options"][text]
+    opt_val = qs[flat_i]["options"][text]
     weights = _option_weights(opt_val)
-    q_text = qs[step]["q"]
+    q_text = qs[flat_i]["q"]
     ans_label = opt_val[0] if isinstance(opt_val[0], str) else str(opt_val[0])
     sid = progress.get("last_session_id")
     if sid:
-        log_answer_row(sid, user_id, tid, step, text, q_text, ans_label, weights)
+        log_answer_row(
+            sid,
+            user_id,
+            tid,
+            flat_i if tid == TEST_OPG else step,
+            text,
+            q_text,
+            ans_label,
+            weights,
+        )
     for ptype, value in weights.items():
         scores[ptype] = scores.get(ptype, 0) + value
     if tid == TEST_OPG:
-        item = qs[step]
+        item = qs[flat_i]
         oi = item.get("opg_item")
         od = item.get("opg_dim")
         if oi is not None and od in ("skill", "att", "wish"):
@@ -1951,6 +2080,58 @@ def handle_answer(vk, user_id: int, text: str):
                 st = {}
                 meta[key] = st
             st[od] = int(next(iter(weights.values())))
+        flow = _opg_ensure_flow(scores)
+        part = int(flow.get("part", 0) or 0)
+        if part < 2:
+            flow["part"] = part + 1
+            save_progress(
+                user_id=user_id,
+                test_id=tid,
+                step=step,
+                scores=scores,
+                status="in_progress",
+                last_session_id=sid,
+            )
+            send_question_message(
+                vk,
+                user_id,
+                tid,
+                step,
+                keyboard=keyboard_for_test(tid, step, _kb_scores),
+                scores=_kb_scores,
+            )
+        else:
+            flow["part"] = 0
+            step += 1
+            if step < OPG_ITEM_COUNT:
+                save_progress(
+                    user_id=user_id,
+                    test_id=tid,
+                    step=step,
+                    scores=scores,
+                    status="in_progress",
+                    last_session_id=sid,
+                )
+                send_question_message(
+                    vk,
+                    user_id,
+                    tid,
+                    step,
+                    keyboard=keyboard_for_test(tid, step, _kb_scores),
+                    scores=_kb_scores,
+                )
+            else:
+                save_progress(
+                    user_id=user_id,
+                    test_id=tid,
+                    step=step,
+                    scores=scores,
+                    status="completed",
+                    last_session_id=sid,
+                )
+                finish_test(vk, user_id, tid, scores)
+        return
+
     step += 1
     if step < len(qs):
         save_progress(
@@ -1985,10 +2166,8 @@ def reminder_worker():
                     continue
                 test_id = progress["test_id"]
                 tid = normalize_test_id(test_id)
-                qs = questions_for(tid)
-                total = len(qs)
+                total = _opg_effective_question_count(tid)
                 step_display = progress["step"] + 1
-                st = progress["step"]
                 send_message(
                     vk,
                     uid,
@@ -2225,8 +2404,11 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         return False
     tid = progress["test_id"]
     step = progress["step"]
+    scores_m = progress.get("scores")
+    _kb_scores = scores_m if tid == TEST_OPG else None
     qs = questions_for(tid)
-    if step >= len(qs):
+    nq = _opg_effective_question_count(tid) if tid == TEST_OPG else len(qs)
+    if step >= nq:
         return False
     if low == "нет":
         abandon_progress(user_id, progress.get("last_session_id"))
@@ -2243,7 +2425,8 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         user_id,
         tid,
         step,
-        keyboard=keyboard_for_test(tid, step),
+        keyboard=keyboard_for_test(tid, step, _kb_scores),
+        scores=_kb_scores,
     )
     return True
 
