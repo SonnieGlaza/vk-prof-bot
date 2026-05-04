@@ -81,6 +81,28 @@ _LONGPOLL_TRANSIENT = (
 # peer_id для vk.messages.send (диалог или беседа); в reminder-потоке не задан
 _REPLY_PEER_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar("reply_peer_id", default=None)
 
+# Защита от двойной обработки одного входящего (Long Poll иногда отдаёт и message_new, и message_reply)
+_LONGPOLL_SEEN_MSG: dict[tuple[int, int], float] = {}
+_LONGPOLL_DEDUP_SEC = 4.0
+
+
+def _longpoll_should_handle_message(peer_id: int, msg: dict) -> bool:
+    cmid = msg.get("conversation_message_id")
+    if cmid is None:
+        cmid = msg.get("id")
+    if cmid is None:
+        return True
+    key = (int(peer_id), int(cmid))
+    now = time.time()
+    cutoff = now - _LONGPOLL_DEDUP_SEC
+    for k, t in list(_LONGPOLL_SEEN_MSG.items()):
+        if t < cutoff:
+            del _LONGPOLL_SEEN_MSG[k]
+    if key in _LONGPOLL_SEEN_MSG:
+        return False
+    _LONGPOLL_SEEN_MSG[key] = now
+    return True
+
 
 def _peer_id_for_send(fallback_from_id: int) -> int:
     p = _REPLY_PEER_ID.get()
@@ -172,13 +194,13 @@ def _ddo_interpret_band(n: int) -> str:
     return "объект труда активно отвергается (ориентир по ключу)"
 
 
-# --- ОПГ (опросник профессиональной готовности): 50 «вопросов» в боте; на каждое высказывание три оценки (умение, отношение, желание).
+# --- ОПГ: 45 «вопросов» в боте (три подшага на высказывание); в JSON 45×3 карточки.
 OPG_SPHERES_ORDER = ["Ч-З", "Ч-Т", "Ч-П", "Ч-Х", "Ч-Ч"]
-OPG_ITEM_COUNT = 50
+OPG_ITEM_COUNT = 45
 OPG_MAX_PER_DIM = OPG_ITEM_COUNT // len(OPG_SPHERES_ORDER) * 2  # 10 пунктов в столбце × 2 балла
 OPG_META_KEY = "__opg_meta"
 OPG_FLOW_KEY = "__opg_flow"
-OPG_FLOW_VER = 2
+OPG_FLOW_VER = 3
 
 QUESTIONS_OPG = _load_questions(OPG_PATH)
 
@@ -426,7 +448,7 @@ WELCOME_TEXT = (
     "Доступные тесты:\n"
     "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий (вариант «а» / «б»), подсчёт по шести столбцам бланка "
     "(природа, техника, другие люди, знаковые системы, художественный образ, «сам человек»); ориентир до 10 баллов по столбцу.\n"
-    "• ОПГ (опросник профессиональной готовности) — 50 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
+    "• ОПГ (опросник профессиональной готовности) — 45 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
     "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
     "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делал(а) — в бланке прочерки на умение и отношение; "
     "в боте на умение выбери «0 — делаю плохо», тогда отношение и желание в сумму не войдут.\n"
@@ -756,30 +778,31 @@ def get_progress(user_id: int):
                 flow = _opg_ensure_flow(scores)
                 fv = int(flow.get("ver", 0) or 0)
                 istep = int(step)
+                flat_n = _opg_flat_len()
                 expected_flat = OPG_ITEM_COUNT * 3
-                if status == "completed" and istep == OPG_ITEM_COUNT:
+                if flat_n != expected_flat:
+                    raise RuntimeError(
+                        f"opg_questions.json: ожидалось {expected_flat} карточек, загружено {flat_n}"
+                    )
+                if fv < OPG_FLOW_VER:
+                    # Новая редакция высказываний / длина — начинаем заново (старые суммы не сопоставимы).
+                    scores = empty_scores(TEST_OPG)
+                    step = 0
+                    flow = _opg_ensure_flow(scores)
                     flow["ver"] = OPG_FLOW_VER
                     flow["part"] = 0
-                elif fv < OPG_FLOW_VER:
-                    if status == "completed" and istep >= expected_flat:
-                        step = OPG_ITEM_COUNT
-                        flow["part"] = 0
-                    elif istep >= expected_flat:
-                        scores = empty_scores(TEST_OPG)
-                        step = 0
-                    else:
-                        step = min(istep // 3, OPG_ITEM_COUNT - 1)
-                        flow["part"] = istep % 3
-                    flow["ver"] = OPG_FLOW_VER
                     save_progress(
                         user_id=user_id,
                         test_id=TEST_OPG,
                         step=step,
                         scores=scores,
-                        status=status,
+                        status="in_progress",
                         reminder_pending=rp,
                         last_session_id=lsid,
                     )
+                elif status == "completed" and istep == OPG_ITEM_COUNT:
+                    flow["ver"] = OPG_FLOW_VER
+                    flow["part"] = 0
                 else:
                     if istep > OPG_ITEM_COUNT or (istep == OPG_ITEM_COUNT and status != "completed"):
                         scores = empty_scores(TEST_OPG)
@@ -2447,11 +2470,7 @@ def main():
     while True:
         try:
             for event in longpoll.listen():
-                if event.type not in (
-                    VkBotEventType.MESSAGE_NEW,
-                    VkBotEventType.MESSAGE_REPLY,
-                    VkBotEventType.MESSAGE_EDIT,
-                ):
+                if event.type != VkBotEventType.MESSAGE_NEW:
                     continue
                 message = event.obj.message
                 if not message:
@@ -2465,6 +2484,8 @@ def main():
                 peer_id = msg.get("peer_id")
                 if peer_id is None:
                     peer_id = user_id
+                if not _longpoll_should_handle_message(int(peer_id), msg):
+                    continue
                 raw_cmd = _event_command_text_candidates(event, msg)
                 if STATS_DEBUG:
                     preview = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
