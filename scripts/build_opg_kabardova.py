@@ -46,6 +46,10 @@ NEVER_NOTE = (
     "в боте на «умение» выбери «0 — делаю плохо (совсем не умею)», тогда отношение и желание по методичке в сумму не войдут."
 )
 
+NEVER_NOTE_FOLLOWUP = (
+    "\n\nЕсли на «умении» выбрал(а) «0 — делаю плохо (совсем не умею)», отношение и желание по методичке в сумму не войдут."
+)
+
 STATEMENTS = [
     "Разбираться в породах животных и видах растений?",
     "Освоить управление каким-либо видом транспорта: железнодорожным, авиационным, автомобильным, морским?",
@@ -133,7 +137,14 @@ def build() -> list:
             ("wish", "Оценка: желание (3).", "Хотели бы вы делать это в вашей будущей работе?"),
         ]:
             head_intro = FULL_INTRO if i == 1 and dim == "skill" else SHORT_HEAD.format(n=i, sphere=sp)
-            qtext = f"{head_intro}{body}\n\n{title}\n{qline}{NEVER_NOTE}"
+            if dim == "skill":
+                qtext = f"{head_intro}{body}\n\n{title}\n{qline}{NEVER_NOTE}"
+            else:
+                qtext = (
+                    f"{head_intro}"
+                    "То же высказывание, что в предыдущем сообщении (не повторяем текст).\n\n"
+                    f"{title}\n{qline}{NEVER_NOTE_FOLLOWUP}"
+                )
             out.append(
                 {
                     "q": qtext,
