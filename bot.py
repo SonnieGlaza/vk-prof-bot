@@ -81,26 +81,69 @@ _LONGPOLL_TRANSIENT = (
 # peer_id для vk.messages.send (диалог или беседа); в reminder-потоке не задан
 _REPLY_PEER_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar("reply_peer_id", default=None)
 
-# Защита от двойной обработки одного входящего (Long Poll иногда отдаёт и message_new, и message_reply)
-_LONGPOLL_SEEN_MSG: dict[tuple[int, int], float] = {}
-_LONGPOLL_DEDUP_SEC = 4.0
+# Защита от двойной доставки одного входящего (два Long Poll, перезапуск, разные поля id/cmid)
+_LONGPOLL_SEEN_MSG: dict[str, float] = {}
+_LONGPOLL_DEDUP_MEM_SEC = 30.0
+_LP_DEDUP_TBL = "longpoll_incoming_dedup"
+_LP_DEDUP_CLEAN_EVERY = 200
+_lp_dedup_cleanup_counter = 0
+
+
+def _longpoll_dedup_keys(peer_id: int, msg: dict) -> list[str]:
+    """Несколько ключей на одно событие: иногда дубли приходят с разными id при одном cmid (и наоборот)."""
+    p = int(peer_id)
+    out: list[str] = []
+    if msg.get("conversation_message_id") is not None:
+        out.append(f"{p}:c:{int(msg['conversation_message_id'])}")
+    if msg.get("id") is not None:
+        out.append(f"{p}:i:{int(msg['id'])}")
+    return out
 
 
 def _longpoll_should_handle_message(peer_id: int, msg: dict) -> bool:
-    cmid = msg.get("conversation_message_id")
-    if cmid is None:
-        cmid = msg.get("id")
-    if cmid is None:
+    keys = _longpoll_dedup_keys(peer_id, msg)
+    if not keys:
         return True
-    key = (int(peer_id), int(cmid))
     now = time.time()
-    cutoff = now - _LONGPOLL_DEDUP_SEC
-    for k, t in list(_LONGPOLL_SEEN_MSG.items()):
+    cutoff = now - _LONGPOLL_DEDUP_MEM_SEC
+    for k_mem, t in list(_LONGPOLL_SEEN_MSG.items()):
         if t < cutoff:
-            del _LONGPOLL_SEEN_MSG[k]
-    if key in _LONGPOLL_SEEN_MSG:
-        return False
-    _LONGPOLL_SEEN_MSG[key] = now
+            del _LONGPOLL_SEEN_MSG[k_mem]
+    for k in keys:
+        if k in _LONGPOLL_SEEN_MSG:
+            return False
+    with db_connect() as conn:
+        cur = conn.cursor()
+        ts = int(now)
+        try:
+            for k in keys:
+                cur.execute(
+                    f"""
+                    INSERT OR IGNORE INTO {_LP_DEDUP_TBL} (dedup_key, seen_at)
+                    VALUES (?, ?)
+                    """,
+                    (k, ts),
+                )
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return False
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"[longpoll dedup insert] {e}")
+            return False
+    for k in keys:
+        _LONGPOLL_SEEN_MSG[k] = now
+    global _lp_dedup_cleanup_counter
+    _lp_dedup_cleanup_counter += 1
+    if _lp_dedup_cleanup_counter % _LP_DEDUP_CLEAN_EVERY == 0:
+        try:
+            old = int(now) - 86400 * 2
+            with db_connect() as conn2:
+                conn2.execute(f"DELETE FROM {_LP_DEDUP_TBL} WHERE seen_at < ?", (old,))
+                conn2.commit()
+        except Exception as e:
+            print(f"[longpoll dedup cleanup] {e}")
     return True
 
 
@@ -609,6 +652,14 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_session ON answer_log(session_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_user ON answer_log(user_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON test_sessions(user_id)")
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {_LP_DEDUP_TBL} (
+                dedup_key TEXT PRIMARY KEY,
+                seen_at INTEGER NOT NULL
+            )
+            """
+        )
         _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
         _ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_progress", "last_session_id", "INTEGER")
