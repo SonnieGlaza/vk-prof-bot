@@ -502,8 +502,8 @@ WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания. "
     "Ответы анонимны на стороне бота; будьте честны — так результат полезнее.\n\n"
     "Доступные тесты:\n"
-    "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий, «Что Вам ближе?»; подсчёт по пяти типам Климова "
-    "(столбец «сам человек» из бланка перенесён в «человек–техника»); максимум баллов по столбцу зависит от ключа.\n"
+    "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий, «Что Вам ближе?»; пять типов Климова; "
+    "по каждому типу в ключе бота одинаковый максимум (12 баллов).\n"
     "• ОПГ (опросник профессиональной готовности) — 45 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
     "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
     "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делали того, что в высказывании — в бланке прочерки на умение и отношение; "
@@ -1727,6 +1727,17 @@ def send_question_message(vk, user_id: int, test_id: str, step: int, keyboard=No
     send_message(vk, user_id, text, keyboard=keyboard, attachment=att)
 
 
+def _display_answer_label(raw: str) -> str:
+    """Первая буква подписи варианта — строчная (латиница/кириллица), остальное без изменений."""
+    s = raw if isinstance(raw, str) else str(raw)
+    if not s:
+        return s
+    for i, ch in enumerate(s):
+        if ch.isalpha():
+            return s[:i] + ch.lower() + s[i + 1 :]
+    return s
+
+
 def render_question(test_id: str, step: int, scores: dict | None = None) -> str:
     tid = normalize_test_id(test_id)
     qs = questions_for(tid)
@@ -1739,7 +1750,7 @@ def render_question(test_id: str, step: int, scores: dict | None = None) -> str:
     keys = sorted(item["options"].keys(), key=lambda x: int(x))
     for key in keys:
         opt = item["options"][key]
-        label = opt[0] if isinstance(opt[0], str) else str(opt[0])
+        label = _display_answer_label(opt[0] if isinstance(opt[0], str) else str(opt[0]))
         lines.append(f"{key}) {label}")
     n = len(keys)
     if n > 6:
@@ -1833,7 +1844,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     best_key = top3[0][0]
 
     if tid == TEST_DDO:
-        title = "📊 Ваш результат по тесту ДДО (пять столбцов бланка; бывший столбец «сам человек» учтён в «Ч-Т»):"
+        title = "📊 Ваш результат по тесту ДДО (пять типов Климова; по каждому до 12 баллов по ключу бота):"
         lines = [title, ""]
         for pk in DDO_DISPLAY_ORDER:
             n = int(scores.get(pk, 0) or 0)

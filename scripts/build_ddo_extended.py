@@ -1,28 +1,16 @@
 #!/usr/bin/env python3
-"""Сборка ddo_questions.json: ДДО 30 пар по бланку-ключу (6 позиций в строке). Столбец «Ч-С» в баллах переносится в «Ч-Т»."""
+"""Сборка ddo_questions.json: ДДО, 30 пар. По каждому из 5 типов Климова — ровно 12 ключевых срабатываний (60 слотов / 5)."""
 
 import json
 import os
+from collections import Counter
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(_BASE, "ddo_questions.json")
 
-# Столбцы бланка слева направо (последний — «Сам человек», в боте не используется как отдельный тип)
-COL_KEYS = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х", "Ч-С"]
-
-# 10 строк × 6 ячеек; в ячейке — (номер пары 1…30, "a" или "b")
-GRID: list[list[tuple[int, str]]] = [
-    [(1, "a"), (1, "b"), (2, "a"), (2, "b"), (3, "a"), (3, "b")],
-    [(4, "a"), (4, "b"), (5, "a"), (5, "b"), (6, "a"), (6, "b")],
-    [(7, "a"), (7, "b"), (8, "a"), (8, "b"), (9, "a"), (9, "b")],
-    [(10, "a"), (10, "b"), (11, "a"), (11, "b"), (12, "a"), (12, "b")],
-    [(13, "a"), (13, "b"), (14, "a"), (14, "b"), (15, "a"), (15, "b")],
-    [(16, "a"), (16, "b"), (17, "a"), (17, "b"), (18, "a"), (18, "b")],
-    [(19, "a"), (19, "b"), (20, "a"), (20, "b"), (21, "a"), (21, "b")],
-    [(22, "a"), (22, "b"), (23, "a"), (23, "b"), (24, "a"), (24, "b")],
-    [(25, "a"), (25, "b"), (26, "a"), (26, "b"), (27, "a"), (27, "b")],
-    [(28, "a"), (28, "b"), (29, "a"), (29, "b"), (30, "a"), (30, "b")],
-]
+# Порядок типов; для пары с индексом p (0…29): вариант «1» и «2» получают ключи
+# keys[p % 5] и keys[(p + 2) % 5] — каждый тип встречается ровно 12 раз за 30 пар.
+BALANCED_KEYS = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х"]
 
 PAIRS: list[tuple[str, str]] = [
     (
@@ -151,30 +139,19 @@ PAIRS: list[tuple[str, str]] = [
 ]
 
 
-def _sphere_for_output(col_key: str) -> str:
-    if col_key == "Ч-С":
-        return "Ч-Т"
-    return col_key
-
-
-def build_pos_map() -> dict[tuple[int, str], str]:
-    pos: dict[tuple[int, str], str] = {}
-    for row in GRID:
-        for col_idx, (n, suf) in enumerate(row):
-            pos[(n, suf)] = COL_KEYS[col_idx]
-    if len(pos) != 60:
-        raise RuntimeError(f"ожидалось 60 ячеек в бланке, получено {len(pos)}")
-    return pos
-
-
 def main() -> None:
     if len(PAIRS) != 30:
         raise RuntimeError(f"ожидалось 30 пар, получено {len(PAIRS)}")
-    pos = build_pos_map()
+    ctr: Counter[str] = Counter()
     out: list[dict] = []
     for i, (ta, tb) in enumerate(PAIRS, start=1):
-        ka = _sphere_for_output(pos[(i, "a")])
-        kb = _sphere_for_output(pos[(i, "b")])
+        p = i - 1
+        ka = BALANCED_KEYS[p % 5]
+        kb = BALANCED_KEYS[(p + 2) % 5]
+        if ka == kb:
+            raise RuntimeError(f"пара {i}: совпали ключи {ka}")
+        ctr[ka] += 1
+        ctr[kb] += 1
         out.append(
             {
                 "q": f"{i}. Что Вам ближе?",
@@ -184,6 +161,10 @@ def main() -> None:
                 },
             }
         )
+    want = {k: 12 for k in BALANCED_KEYS}
+    got = dict(ctr)
+    if got != want:
+        raise RuntimeError(f"ожидалось по 12 срабатываний на тип, получено {got}")
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
         f.write("\n")

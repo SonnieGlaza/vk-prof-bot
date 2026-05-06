@@ -132,13 +132,14 @@ def build() -> list:
             ("att", "Оценка: отношение (2).", "Какие ощущения вы испытывали, когда делали это?"),
             ("wish", "Оценка: желание (3).", "Хотели бы вы делать это в вашей будущей работе?"),
         ]:
+            mark = "❗ "
             head_intro = FULL_INTRO if i == 1 and dim == "skill" else SHORT_HEAD.format(n=i, sphere=sp)
             if dim == "skill":
-                qtext = f"{head_intro}{body}\n\n{title}\n{qline}{NEVER_NOTE}"
+                qtext = f"{head_intro}{mark}{body}\n\n{title}\n{qline}{NEVER_NOTE}"
             else:
                 qtext = (
                     f"{head_intro}"
-                    "То же высказывание, что в предыдущем сообщении (не повторяем текст).\n\n"
+                    f"{mark}То же высказывание, что в предыдущем сообщении (не повторяем текст).\n\n"
                     f"{title}\n{qline}{NEVER_NOTE_FOLLOWUP}"
                 )
             out.append(
