@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Сборка ddo_questions.json: ДДО 30 пар, 6 столбцов (по позиции в бланке-ключе)."""
+"""Сборка ddo_questions.json: ДДО 30 пар по бланку-ключу (6 позиций в строке). Столбец «Ч-С» в баллах переносится в «Ч-Т»."""
 
 import json
 import os
@@ -7,7 +7,7 @@ import os
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(_BASE, "ddo_questions.json")
 
-# Столбцы бланка слева направо (строка заголовка методички)
+# Столбцы бланка слева направо (последний — «Сам человек», в боте не используется как отдельный тип)
 COL_KEYS = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х", "Ч-С"]
 
 # 10 строк × 6 ячеек; в ячейке — (номер пары 1…30, "a" или "b")
@@ -24,7 +24,6 @@ GRID: list[list[tuple[int, str]]] = [
     [(28, "a"), (28, "b"), (29, "a"), (29, "b"), (30, "a"), (30, "b")],
 ]
 
-# Тексты без префиксов Nа/Nб — их добавляет скрипт
 PAIRS: list[tuple[str, str]] = [
     (
         "Выращивать и дрессировать служебных собак для поиска наркотиков",
@@ -152,6 +151,12 @@ PAIRS: list[tuple[str, str]] = [
 ]
 
 
+def _sphere_for_output(col_key: str) -> str:
+    if col_key == "Ч-С":
+        return "Ч-Т"
+    return col_key
+
+
 def build_pos_map() -> dict[tuple[int, str], str]:
     pos: dict[tuple[int, str], str] = {}
     for row in GRID:
@@ -168,14 +173,14 @@ def main() -> None:
     pos = build_pos_map()
     out: list[dict] = []
     for i, (ta, tb) in enumerate(PAIRS, start=1):
-        ka = pos[(i, "a")]
-        kb = pos[(i, "b")]
+        ka = _sphere_for_output(pos[(i, "a")])
+        kb = _sphere_for_output(pos[(i, "b")])
         out.append(
             {
-                "q": f"{i}. Что тебе ближе?",
+                "q": f"{i}. Что Вам ближе?",
                 "options": {
-                    "1": [f"{i}а. {ta}", {ka: 1}],
-                    "2": [f"{i}б. {tb}", {kb: 1}],
+                    "1": [ta, {ka: 1}],
+                    "2": [tb, {kb: 1}],
                 },
             }
         )

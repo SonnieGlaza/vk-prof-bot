@@ -173,12 +173,12 @@ LABEL_KOT = "КОТ (краткий ориентировочный тест)"
 LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
 LABEL_HOLLAND = "Голланд (RIASEC, пары профессий)"
-LABEL_YOVASHI = "Йоваши (проф. склонности, модиф. Резапкиной)"
+LABEL_YOVASHI = "Йовайши (проф. склонности, модиф. Резапкиной)"
 
 # Подписи на кнопках клавиатуры (лимит ВК)
 KB_OPG = "ОПГ"
 KB_PROF_TABLE = "Таблица (ОПТ проф.)"
-KB_YOVASHI = "Йоваши"
+KB_YOVASHI = "Йовайши"
 KB_KETTELL = "Кеттелл 16PF"
 KB_KETTELL_16PF_C_YOUTH = "16PF/C (мол.)"
 KB_KOT = "КОТ"
@@ -197,10 +197,9 @@ POST_TEST_REFERRAL_TRUDVSEM = (
 CAREER_HINTS_DDO = {
     "Ч-П": "🌿 Человек-Природа\n\nПрофессии, связанные с природой и живыми системами: биолог, эколог, ветеринар, агроном, лесник.\n\nРекомендация: биология, география, экология.",
     "Ч-Т": "🔧 Человек-Техника\n\nРабота с техникой, механизмами, производством: инженер, техник, программист, монтажник.\n\nРекомендация: математика, физика, информатика, черчение.",
-    "Ч-Ч": "👥 Человек — другие люди\n\nОбщение, обучение, сервис, помощь: педагог, врач, психолог, менеджер по персоналу, юрист.\n\nРекомендация: развивай коммуникацию и эмпатию.",
+    "Ч-Ч": "👥 Человек — другие люди\n\nОбщение, обучение, сервис, помощь: педагог, врач, психолог, менеджер по персоналу, юрист.\n\nРекомендация: развивайте коммуникацию и эмпатию.",
     "Ч-З": "📊 Человек-Знаковая система\n\nТексты, цифры, схемы, документы: бухгалтер, аналитик, переводчик, экономист, программист.\n\nРекомендация: математика, языки, внимание к деталям.",
     "Ч-Х": "🎨 Человек-Художественный образ\n\nТворчество и эстетика: дизайнер, художник, актёр, музыкант, режиссёр.\n\nРекомендация: искусство, литература, творческие практики.",
-    "Ч-С": "🏃 Сам человек\n\nФизическая нагрузка, спорт, выносливость, телесные навыки: спорт, тренерство, спасательные и смежные направления.\n\nРекомендация: физкультура, здоровье, постановка движения.",
 }
 
 
@@ -209,30 +208,44 @@ def _load_questions(path: str):
         return json.load(_f)
 
 
-# --- ДДО (расширенная форма, 6 столбцов по бланку-ключу): 30 пар «а/б»
+# --- ДДО: 30 пар по бланку-ключу; столбец «сам человек» учтён в «Ч-Т» (отдельного типа нет).
 PROFESSION_TYPES = {
     "Ч-П": "Человек-Природа",
     "Ч-Т": "Человек-Техника",
     "Ч-Ч": "Человек — другие люди",
     "Ч-З": "Человек-Знаковая система",
     "Ч-Х": "Человек-Художественный образ",
-    "Ч-С": "Сам человек",
 }
 
 QUESTIONS_DDO = _load_questions(DDO_PATH)
-DDO_MAX_SCORE = 10
-DDO_DISPLAY_ORDER = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х", "Ч-С"]
 
 
-def _ddo_interpret_band(n: int) -> str:
-    """Ориентир по методичке (сумма по столбцу 0–10)."""
-    if n >= 9:
+def _ddo_max_by_category() -> dict[str, int]:
+    m = {k: 0 for k in PROFESSION_TYPES}
+    for q in QUESTIONS_DDO:
+        for opt in q["options"].values():
+            if isinstance(opt, (list, tuple)) and len(opt) >= 2 and isinstance(opt[1], dict):
+                for k in opt[1]:
+                    if k in m:
+                        m[k] += 1
+    return m
+
+
+DDO_MAX_BY_CATEGORY = _ddo_max_by_category()
+DDO_DISPLAY_ORDER = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х"]
+
+
+def _ddo_interpret_band(n: int, cap: int | None = None) -> str:
+    """Ориентир по ключу; cap — максимум баллов по столбцу в текущей версии."""
+    c = int(cap) if cap is not None and int(cap) > 0 else 10
+    r = (n / c) if c else 0.0
+    if r >= 0.9:
         return "ярко выраженная склонность"
-    if n >= 7:
+    if r >= 0.7:
         return "выраженная склонность"
-    if n >= 4:
+    if r >= 0.4:
         return "склонность на среднем уровне"
-    if n >= 2:
+    if r >= 0.2:
         return "склонность не выражена"
     return "объект труда активно отвергается (ориентир по ключу)"
 
@@ -487,18 +500,18 @@ CAREER_HINTS_JOVASHI = {
 
 WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания. "
-    "Ответы анонимны на стороне бота; будь честным(ой) — так результат полезнее.\n\n"
+    "Ответы анонимны на стороне бота; будьте честны — так результат полезнее.\n\n"
     "Доступные тесты:\n"
-    "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий (вариант «а» / «б»), подсчёт по шести столбцам бланка "
-    "(природа, техника, другие люди, знаковые системы, художественный образ, «сам человек»); ориентир до 10 баллов по столбцу.\n"
+    "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий, «Что Вам ближе?»; подсчёт по пяти типам Климова "
+    "(столбец «сам человек» из бланка перенесён в «человек–техника»); максимум баллов по столбцу зависит от ключа.\n"
     "• ОПГ (опросник профессиональной готовности) — 45 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
     "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
-    "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делал(а) — в бланке прочерки на умение и отношение; "
-    "в боте на умение выбери «0 — делаю плохо», тогда отношение и желание в сумму не войдут.\n"
+    "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делали того, что в высказывании — в бланке прочерки на умение и отношение; "
+    "в боте на умение выберите «0 — делаю плохо», тогда отношение и желание в сумму не войдут.\n"
     "• ОПТ (Таблица для ориентировочного определения предпочтительности типа будущей профессии) — 24 вопроса, "
     "3 варианта; сферы интересов: люди, техника, искусство и др.\n"
-    "• Йоваши (проф. склонности, модиф. Резапкиной) — 24 вопроса, 3 варианта; выявление преобладающих склонностей "
-    "человека к определённым типам профессиональной деятельности.\n"
+    "• Йовайши (проф. склонности, модиф. Резапкиной) — 24 вопроса, 3 варианта; выявление преобладающих склонностей "
+    "к определённым типам профессиональной деятельности.\n"
     "• Кеттелл 16PF — 187 вопросов для взрослых; ориентировочные суммы по первичным факторам в боте.\n"
     "• Кеттелл 16PF/C — 105 вопросов для молодёжи; в боте 15 блоков по 7 пунктов (фактор Q4 не входит в форму).\n"
     "• КОТ — краткий ориентировочный тест (логика, словарь, внимание, ориентировочные задачи; часть пунктов с чертежами в оригинале "
@@ -507,7 +520,7 @@ WELCOME_TEXT = (
     "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
     "(достоверность ответов); формат ориентирован на взрослых.\n"
     "• Голланд (RIASEC) — 42 пары профессий (вариант А / В); шесть типов предпочтений по ключу из методички.\n\n"
-    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йоваши, голланд, кеттелл (16pf), "
+    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йовайши (или йоваши), голланд, кеттелл (16pf), "
     "16pf/c (молодёжь), кот, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
 )
 
@@ -797,9 +810,21 @@ def get_progress(user_id: int):
         lsid = int(last_session_id) if last_session_id is not None else None
         if tid == TEST_DDO and scores:
             need = set(PROFESSION_TYPES.keys())
-            if not need <= set(scores.keys()) or step > len(QUESTIONS_DDO):
-                scores = empty_scores(TEST_DDO)
+            sk = set(scores.keys())
+            nq = len(QUESTIONS_DDO)
+            dirty = False
+            if sk != need or "Ч-С" in scores:
+                merged = empty_scores(TEST_DDO)
+                for k in need:
+                    merged[k] = int(scores.get(k, 0) or 0)
+                if "Ч-С" in scores:
+                    merged["Ч-Т"] += int(scores["Ч-С"] or 0)
+                scores = merged
+                dirty = True
+            if step > nq or step < 0:
                 step = 0
+                dirty = True
+            if dirty:
                 save_progress(
                     user_id=user_id,
                     test_id=TEST_DDO,
@@ -1190,18 +1215,20 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
                 key=lambda x: x[1],
                 reverse=True,
             )[:3]
-        out_lines: list[str] = [f"ДДО: топ-3 столбца по сумме баллов (ориентир до {DDO_MAX_SCORE} по каждому):"]
+        out_lines: list[str] = ["ДДО: топ-3 столбца по сумме баллов (максимум зависит от столбца, см. ниже):"]
         for i, (ptype, points) in enumerate(d_top, 1):
-            band = _ddo_interpret_band(int(points))
+            mx = DDO_MAX_BY_CATEGORY.get(ptype, 10)
+            band = _ddo_interpret_band(int(points), mx)
             out_lines.append(
-                f"{i}. {PROFESSION_TYPES.get(ptype, ptype)} — {points} из {DDO_MAX_SCORE} ({band})"
+                f"{i}. {PROFESSION_TYPES.get(ptype, ptype)} — {points} из {mx} ({band})"
             )
         out_lines.append("")
         out_lines.append("Все столбцы бланка:")
         for pk in DDO_DISPLAY_ORDER:
             n = int(scores.get(pk, 0) or 0)
+            mx = DDO_MAX_BY_CATEGORY.get(pk, 10)
             out_lines.append(
-                f"• {PROFESSION_TYPES[pk]}: {n} из {DDO_MAX_SCORE} — {_ddo_interpret_band(n)}"
+                f"• {PROFESSION_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}"
             )
         return "\n".join(out_lines)
     if tid == TEST_OPG:
@@ -1493,9 +1520,9 @@ def handle_stats_command(vk, user_id: int, text: str) -> bool:
             vk,
             user_id,
             "Выгрузка только для администраторов.\n\n"
-            "Сделай так: открой Railway → твой сервис → Variables → добавь STATS_ADMIN_IDS = твой числовой id ВК "
-            "(только цифры, без пробелов). Id смотри в ссылке на страницу vk.com/id… или через настройки. "
-            "Сохрани и Redeploy. Потом напиши боту одно слово: выгрузка или /stats — в таблицу попадут все данные за всё время. "
+            "Сделайте так: откройте Railway → ваш сервис → Variables → добавьте STATS_ADMIN_IDS = ваш числовой id ВК "
+            "(только цифры, без пробелов). Id смотрите в ссылке на страницу vk.com/id… или через настройки. "
+            "Сохраните и Redeploy. Потом напишите боту одно слово: выгрузка или /stats — в таблицу попадут все данные за всё время. "
             "Только за сегодня (по Москве) — добавь в сообщение «сегодня» или «за сегодня».",
         )
         return True
@@ -1716,17 +1743,17 @@ def render_question(test_id: str, step: int, scores: dict | None = None) -> str:
         lines.append(f"{key}) {label}")
     n = len(keys)
     if n > 6:
-        lines.append(f"\nВыбери ответ кнопкой с 1 по {n}.")
+        lines.append(f"\nВыберите ответ кнопкой с 1 по {n}.")
     elif n == 6:
-        lines.append("\nВыбери ответ кнопкой 1, 2, 3, 4, 5 или 6.")
+        lines.append("\nВыберите ответ кнопкой 1, 2, 3, 4, 5 или 6.")
     elif n == 5:
-        lines.append("\nВыбери ответ кнопкой 1, 2, 3, 4 или 5.")
+        lines.append("\nВыберите ответ кнопкой 1, 2, 3, 4 или 5.")
     elif n == 4:
-        lines.append("\nВыбери ответ кнопкой 1, 2, 3 или 4.")
+        lines.append("\nВыберите ответ кнопкой 1, 2, 3 или 4.")
     elif n == 3:
-        lines.append("\nВыбери ответ кнопкой 1, 2 или 3.")
+        lines.append("\nВыберите ответ кнопкой 1, 2 или 3.")
     else:
-        lines.append("\nВыбери ответ кнопкой 1 или 2.")
+        lines.append("\nВыберите ответ кнопкой 1 или 2.")
     return "\n".join(lines)
 
 
@@ -1783,7 +1810,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
                 f"отношение {d['att']}/{OPG_MAX_PER_DIM}, желание {d['wish']}/{OPG_MAX_PER_DIM}"
             )
         lines.append(
-            "\nСопоставь шкалы: благоприятнее, когда желание и отношение согласуются с умением (см. методичку)."
+            "\nСопоставьте шкалы: благоприятнее, когда желание и отношение согласуются с умением (см. методичку)."
         )
         lines.append(f"\n{CAREER_HINTS_OPG.get(best_key, '')}")
         lines.append("")
@@ -1798,7 +1825,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         send_message(
             vk,
             user_id,
-            "Не удалось посчитать результат. Открой меню и начни тест заново.",
+            "Не удалось посчитать результат. Откройте меню и начните тест заново.",
             keyboard=build_menu_keyboard(),
         )
         return
@@ -1806,33 +1833,37 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     best_key = top3[0][0]
 
     if tid == TEST_DDO:
-        title = f"📊 Твой результат по тесту ДДО (шесть столбцов бланка, ориентир до {DDO_MAX_SCORE} баллов по каждому):"
+        title = "📊 Ваш результат по тесту ДДО (пять столбцов бланка; бывший столбец «сам человек» учтён в «Ч-Т»):"
         lines = [title, ""]
         for pk in DDO_DISPLAY_ORDER:
             n = int(scores.get(pk, 0) or 0)
-            lines.append(f"• {PROFESSION_TYPES[pk]}: {n} из {DDO_MAX_SCORE} — {_ddo_interpret_band(n)}")
+            mx = DDO_MAX_BY_CATEGORY.get(pk, 10)
+            lines.append(f"• {PROFESSION_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}")
         lines.append("")
         lines.append("Топ-3 по сумме баллов:")
         for i, (ptype, points) in enumerate(top3, 1):
+            mx = DDO_MAX_BY_CATEGORY.get(ptype, 10)
             lines.append(
-                f"{i}. {PROFESSION_TYPES[ptype]} — {points} из {DDO_MAX_SCORE} ({_ddo_interpret_band(int(points))})"
+                f"{i}. {PROFESSION_TYPES[ptype]} — {points} из {mx} ({_ddo_interpret_band(int(points), mx)})"
             )
-        lines.append(f"\n{CAREER_HINTS_DDO.get(best_key, 'Выбирай направление, которое откликается сильнее.')}")
-        lines.append("\nХочешь пройти снова — выбери тест кнопкой или командой.")
+        lines.append(
+            f"\n{CAREER_HINTS_DDO.get(best_key, 'Выберите направление, которое откликается сильнее.')}"
+        )
+        lines.append("\nХотите пройти снова — выберите тест кнопкой или командой.")
     elif tid == TEST_JOVASHI:
-        lines = [f"📊 Твой результат по «{LABEL_PROF_TABLE}» (топ-3 сферы):"]
+        lines = [f"📊 Ваш результат по «{LABEL_PROF_TABLE}» (топ-3 сферы):"]
         for i, (key, points) in enumerate(top3, 1):
             interp = _interpret_jovashi(points)
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
         lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
-        lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
+        lines.append("\nСравните несколько сильных сфер и подумайте, какие профессии их объединяют.")
     elif tid == TEST_YOVASHI:
-        lines = [f"📊 Твой результат по «{LABEL_YOVASHI}» (топ-3 сферы):"]
+        lines = [f"📊 Ваш результат по «{LABEL_YOVASHI}» (топ-3 сферы):"]
         for i, (key, points) in enumerate(top3, 1):
             interp = _interpret_jovashi(points)
             lines.append(f"{i}. {JOVASHI_SPHERES[key]} — {points} баллов ({interp})")
         lines.append(f"\n{CAREER_HINTS_JOVASHI.get(best_key, '')}")
-        lines.append("\nСравни несколько сильных сфер и подумай, какие профессии их объединяют.")
+        lines.append("\nСравните несколько сильных сфер и подумайте, какие профессии их объединяют.")
     elif tid in (TEST_KETTELL, TEST_KETTELL_16PF_C_YOUTH):
         mxmap = _pf16_block_max_map(tid)
         disp = LABEL_KETTELL_16PF_C_YOUTH if tid == TEST_KETTELL_16PF_C_YOUTH else LABEL_KETTELL
@@ -1863,12 +1894,12 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         if tid == TEST_KETTELL_16PF_C_YOUTH:
             lines.append(
                 "\nПодсчёт — упрощённый: 15 блоков по 7 пунктов; фактор Q4 в форме не представлен. "
-                "Используй официальную обработку издателя для норм."
+                "Используйте официальную обработку издателя для норм."
             )
         else:
             lines.append(
                 "\nПодсчёт в боте — упрощённый учебный: блоки пунктов как в форме A, без официальной таблицы весов. "
-                "Для решений о лицензии/кадрах используй обработку по методике издателя."
+                "Для решений о лицензии/кадрах используйте обработку по методике издателя."
             )
     elif tid == TEST_KOT:
         total = len(QUESTIONS_KOT)
@@ -1881,11 +1912,11 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             "пункты с рисунками заменены на текстовые варианты для самопроверки.",
         ]
         if pct >= 75:
-            lines.append("\nСильный результат — продолжай тренировать внимание и логику на разных типах заданий.")
+            lines.append("\nСильный результат — продолжайте тренировать внимание и логику на разных типах заданий.")
         elif pct >= 50:
             lines.append("\nСредний уровень — полезно разбирать ошибки и возвращаться к пунктам с вычислениями.")
         else:
-            lines.append("\nЕсть куда расти: разбирай каждое задание и закрепляй термины и приёмы счёта.")
+            lines.append("\nЕсть куда расти: разбирайте каждое задание и закрепляйте термины и приёмы счёта.")
     elif tid == TEST_EN57:
         e = scores.get("E", 0)
         n = scores.get("N", 0)
@@ -1897,10 +1928,10 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             f"• {EN_LIE_LABEL}: {l} из 9.",
             "",
             "Формат ориентирован на взрослых. Шкала L показывает меру «социально желательных» ответов; "
-            "интерпретируй осторожно.",
+            "интерпретируйте осторожно.",
             "",
             "Больше баллов по E — склонность к активности и контактам; по N — сильнее реакция на стресс. "
-            "Обсуди сомнения со специалистом.",
+            "Обсудите сомнения со специалистом.",
         ]
     elif tid == TEST_EN60:
         e = scores.get("E", 0)
@@ -1915,7 +1946,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             "Удобнее для детей и подростков. Счёт по ключу: «да» / «нет» на отмеченных пунктах.",
             "",
             "Больше баллов по E — склонность к активности и контактам; по N — сильнее чувствительность к стрессу. "
-            "Высокий L может указывать на «социально желательные» ответы. Обсуди сомнения со специалистом.",
+            "Высокий L может указывать на «социально желательные» ответы. Обсудите сомнения со специалистом.",
         ]
     elif tid == TEST_HOLLAND_RIASEC:
         lines = [
@@ -1942,7 +1973,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
             "\nЭто ориентир по предпочтениям в профессии, не заменяет полноценную профориентационную беседу."
         )
     else:
-        lines = ["Результат сохранён. Открой меню и выбери другой тест."]
+        lines = ["Результат сохранён. Откройте меню и выберите другой тест."]
 
     lines.append("")
     lines.append(POST_TEST_REFERRAL_TRUDVSEM)
@@ -1994,7 +2025,7 @@ def handle_answer(vk, user_id: int, text: str):
         send_message(
             vk,
             user_id,
-            "Сейчас нет активного теста. Напиши «меню» или выбери тест кнопкой.",
+            "Сейчас нет активного теста. Напишите «меню» или выберите тест кнопкой.",
             keyboard=build_menu_keyboard(),
         )
         return
@@ -2026,7 +2057,7 @@ def handle_answer(vk, user_id: int, text: str):
         send_message(
             vk,
             user_id,
-            f"Пожалуйста, используй кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
+            f"Пожалуйста, используйте кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
             keyboard=keyboard_for_test(tid, step, _kb_scores),
         )
         send_question_message(
@@ -2055,7 +2086,8 @@ def handle_answer(vk, user_id: int, text: str):
             weights,
         )
     for ptype, value in weights.items():
-        scores[ptype] = scores.get(ptype, 0) + value
+        if ptype in scores:
+            scores[ptype] = scores[ptype] + value
     if tid == TEST_OPG:
         item = qs[flat_i]
         oi = item.get("opg_item")
@@ -2162,7 +2194,7 @@ def reminder_worker():
                 send_message(
                     vk,
                     uid,
-                    f"⏰ Напоминание: ты на вопросе {step_display} из {total}.\n"
+                    f"⏰ Напоминание: Вы на вопросе {step_display} из {total}.\n"
                     "Продолжим? «Да» — вернёмся к опросу, «Нет» — выход в меню.",
                     keyboard=build_reminder_continue_keyboard(),
                 )
@@ -2443,7 +2475,7 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("таблица", "таблица опт", "опт"):
         start_test(vk, user_id, TEST_JOVASHI)
         return True
-    if t in ("йоваши", "yovashi", "iovashi", "jovashi"):
+    if t in ("йовайши", "йоваши", "yovashi", "iovashi", "jovashi"):
         start_test(vk, user_id, TEST_YOVASHI)
         return True
     if t in ("кеттелл", "kettell", "cattell", "16pf", "16пф"):
@@ -2502,11 +2534,11 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
 def main():
     if not VK_TOKEN:
         raise SystemExit(
-            "Не задан VK_TOKEN. Задай переменную окружения VK_TOKEN (ключ сообщества ВКонтакте), например в Railway → Variables."
+            "Не задан VK_TOKEN. Задайте переменную окружения VK_TOKEN (ключ сообщества ВКонтакте), например в Railway → Variables."
         )
     if GROUP_ID <= 0:
         raise SystemExit(
-            "Не задан или неверный VK_GROUP_ID. Укажи целое число — ID группы для VkBotLongPoll (в Variables на Railway)."
+            "Не задан или неверный VK_GROUP_ID. Укажите целое число — ID группы для VkBotLongPoll (в Variables на Railway)."
         )
     init_db()
     threading.Thread(target=reminder_worker, daemon=True).start()
@@ -2559,7 +2591,7 @@ def main():
                         send_message(
                             vk,
                             user_id,
-                            "Не понял команду. Напиши «меню» или выбери тест кнопкой внизу.",
+                            "Не понял команду. Напишите «меню» или выберите тест кнопкой внизу.",
                             keyboard=build_menu_keyboard(),
                         )
                 finally:
