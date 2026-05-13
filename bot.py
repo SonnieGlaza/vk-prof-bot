@@ -46,7 +46,7 @@ _STATS_EXPORT_SECRET_RAW = (os.environ.get("STATS_EXPORT_SECRET") or "").strip()
 # SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
 _DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
 DB_PATH = (os.environ.get("SQLITE_PATH") or os.environ.get("DB_PATH") or _DB_DEFAULT).strip() or _DB_DEFAULT
-DDO_PATH = os.path.join(_BASE, "ddo_questions.json")
+KLIMOV_SELF_PATH = os.path.join(_BASE, "klimov_self_table_questions.json")
 OPG_PATH = os.path.join(_BASE, "opg_questions.json")
 JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
 YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
@@ -151,7 +151,7 @@ def _peer_id_for_send(fallback_from_id: int) -> int:
     p = _REPLY_PEER_ID.get()
     return p if p is not None else fallback_from_id
 
-TEST_DDO = "ddo"
+TEST_KLIMOV_SELF = "klimov_self"
 TEST_OPG = "opg"
 TEST_JOVASHI = "jovashi"
 TEST_YOVASHI = "yovashi"
@@ -174,8 +174,10 @@ LABEL_EN60 = "ЭН - 60"
 LABEL_EN57 = "ЭН - 57"
 LABEL_HOLLAND = "Голланд (RIASEC, пары профессий)"
 LABEL_YOVASHI = "Йовайши (проф. склонности, модиф. Резапкиной)"
+LABEL_KLIMOV_SELF = "ДДО"
 
 # Подписи на кнопках клавиатуры (лимит ВК)
+KB_KLIMOV_SELF = "ДДО"
 KB_OPG = "ОПГ"
 KB_PROF_TABLE = "Таблица (ОПТ проф.)"
 KB_YOVASHI = "Йовайши"
@@ -202,13 +204,21 @@ CAREER_HINTS_DDO = {
     "Ч-Х": "🎨 Человек-Художественный образ\n\nТворчество и эстетика: дизайнер, художник, актёр, музыкант, режиссёр.\n\nРекомендация: искусство, литература, творческие практики.",
 }
 
+CAREER_HINTS_KLIMOV_SELF = {
+    "П": CAREER_HINTS_DDO["Ч-П"],
+    "Т": CAREER_HINTS_DDO["Ч-Т"],
+    "З": CAREER_HINTS_DDO["Ч-З"],
+    "Х": CAREER_HINTS_DDO["Ч-Х"],
+    "Ч": CAREER_HINTS_DDO["Ч-Ч"],
+}
+
 
 def _load_questions(path: str):
     with open(path, encoding="utf-8") as _f:
         return json.load(_f)
 
 
-# --- ДДО: 30 пар по классическому бланку 10×6; в боте столбец «сам человек» (Ч-С) суммируется с Ч-Т.
+# --- ОПГ и др.: полные ключи столбцов бланка Климова (Ч-П … Ч-Ч).
 PROFESSION_TYPES = {
     "Ч-П": "Человек-Природа",
     "Ч-Т": "Человек-Техника",
@@ -217,22 +227,31 @@ PROFESSION_TYPES = {
     "Ч-Х": "Человек-Художественный образ",
 }
 
-QUESTIONS_DDO = _load_questions(DDO_PATH)
+# --- Таблица самооценки Климова: 30 утверждений, согласие начисляет 1 или 2 балла в столбец П/Т/З/Х/Ч.
+KLIMOV_SELF_TYPES = {
+    "П": "Человек — природа",
+    "Т": "Человек — техника",
+    "З": "Человек — знаковая система",
+    "Х": "Человек — художественный образ",
+    "Ч": "Человек — человек",
+}
+
+QUESTIONS_KLIMOV_SELF = _load_questions(KLIMOV_SELF_PATH)
 
 
-def _ddo_max_by_category() -> dict[str, int]:
-    m = {k: 0 for k in PROFESSION_TYPES}
-    for q in QUESTIONS_DDO:
+def _klimov_self_max_by_category() -> dict[str, int]:
+    m = {k: 0 for k in KLIMOV_SELF_TYPES}
+    for q in QUESTIONS_KLIMOV_SELF:
         for opt in q["options"].values():
             if isinstance(opt, (list, tuple)) and len(opt) >= 2 and isinstance(opt[1], dict):
-                for k in opt[1]:
+                for k, v in opt[1].items():
                     if k in m:
-                        m[k] += 1
+                        m[k] += int(v)
     return m
 
 
-DDO_MAX_BY_CATEGORY = _ddo_max_by_category()
-DDO_DISPLAY_ORDER = ["Ч-П", "Ч-Т", "Ч-Ч", "Ч-З", "Ч-Х"]
+KLIMOV_SELF_MAX_BY_CATEGORY = _klimov_self_max_by_category()
+KLIMOV_SELF_DISPLAY_ORDER = ["П", "Т", "З", "Х", "Ч"]
 
 
 def _ddo_interpret_band(n: int, cap: int | None = None) -> str:
@@ -502,9 +521,8 @@ WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания. "
     "Ответы анонимны на стороне бота; будьте честны — так результат полезнее.\n\n"
     "Доступные тесты:\n"
-    "• ДДО (дифференциально-диагностический опросник) — 30 пар занятий, «Что Вам ближе?»; подсчёт по классическому бланку Климова "
-    "(10 строк × 6 столбцов). В боте пять типов: столбец «сам человек» объединён с «человек–техника»; ориентир методички до 10 баллов "
-    "по столбцу на бланке, для «техники» в сумме с бывшим шестым столбцом — до 20.\n"
+    "• ДДО — 30 утверждений «согласен / не согласен»; баллы по столбцам бланка П, Т, З, Х, Ч "
+    "(природа, техника, знаковая система, художественный образ, человек–человек). Вес пункта 1 или 2 балла по ключу методички.\n"
     "• ОПГ (опросник профессиональной готовности) — 45 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
     "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
     "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делали того, что в высказывании — в бланке прочерки на умение и отношение; "
@@ -522,13 +540,15 @@ WELCOME_TEXT = (
     "(достоверность ответов); формат ориентирован на взрослых.\n"
     "• Голланд (RIASEC) — 42 пары профессий (вариант А / В); шесть типов предпочтений по ключу из методички.\n\n"
     "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йовайши (или йоваши), голланд, кеттелл (16pf), "
-    "16pf/c (молодёжь), кот, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение."
+    "16pf/c (молодёжь), кот, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение.\n\n"
+    "Для администраторов — выгрузка в Excel: «отчет все время», «отчет квартал» (90 суток), «отчет месяц» (30 суток), «отчет неделя» (7 суток); "
+    "также «выгрузка» или /stats (по умолчанию — всё время). В файле два листа: сводка по сессиям и все пошаговые ответы из журнала."
 )
 
 
 def normalize_test_id(test_id: str | None) -> str:
     if not test_id:
-        return TEST_DDO
+        return TEST_KLIMOV_SELF
     if test_id == LEGACY_HOLLAND:
         return TEST_HOLLAND_RIASEC
     return test_id
@@ -543,8 +563,8 @@ def _pf16_block_max_map(tid: str) -> dict[str, float]:
 
 def questions_for(test_id: str):
     tid = normalize_test_id(test_id)
-    if tid == TEST_DDO:
-        return QUESTIONS_DDO
+    if tid == TEST_KLIMOV_SELF:
+        return QUESTIONS_KLIMOV_SELF
     if tid == TEST_OPG:
         return QUESTIONS_OPG
     if tid == TEST_JOVASHI:
@@ -563,13 +583,13 @@ def questions_for(test_id: str):
         return QUESTIONS_EN57
     if tid == TEST_HOLLAND_RIASEC:
         return QUESTIONS_HOLLAND_RIASEC
-    return QUESTIONS_DDO
+    return QUESTIONS_KLIMOV_SELF
 
 
 def empty_scores(test_id: str) -> dict:
     tid = normalize_test_id(test_id)
-    if tid == TEST_DDO:
-        return {k: 0 for k in PROFESSION_TYPES}
+    if tid == TEST_KLIMOV_SELF:
+        return {k: 0 for k in KLIMOV_SELF_TYPES}
     if tid == TEST_OPG:
         base = {k: 0 for k in _opg_score_keys()}
         base[OPG_META_KEY] = {}
@@ -615,7 +635,7 @@ def init_db():
                 started_at INTEGER NOT NULL,
                 last_activity_at INTEGER NOT NULL,
                 reminded_at INTEGER,
-                test_id TEXT NOT NULL DEFAULT 'ddo',
+                test_id TEXT NOT NULL DEFAULT 'klimov_self',
                 reminder_pending INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -629,7 +649,7 @@ def init_db():
                 scores_json TEXT NOT NULL,
                 top3_json TEXT NOT NULL,
                 best_type TEXT NOT NULL,
-                test_id TEXT NOT NULL DEFAULT 'ddo'
+                test_id TEXT NOT NULL DEFAULT 'klimov_self'
             )
             """
         )
@@ -674,10 +694,10 @@ def init_db():
             )
             """
         )
-        _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
+        _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
         _ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_progress", "last_session_id", "INTEGER")
-        _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'ddo'")
+        _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
         _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
             "UPDATE user_progress SET test_id=? WHERE test_id=?",
@@ -694,6 +714,23 @@ def init_db():
         cur.execute(
             "UPDATE answer_log SET test_id=? WHERE test_id=?",
             (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
+        )
+        _legacy_ddo_tid = "ddo"
+        cur.execute(
+            "UPDATE user_progress SET test_id=? WHERE test_id=?",
+            (TEST_KLIMOV_SELF, _legacy_ddo_tid),
+        )
+        cur.execute(
+            "UPDATE test_results SET test_id=? WHERE test_id=?",
+            (TEST_KLIMOV_SELF, _legacy_ddo_tid),
+        )
+        cur.execute(
+            "UPDATE test_sessions SET test_id=? WHERE test_id=?",
+            (TEST_KLIMOV_SELF, _legacy_ddo_tid),
+        )
+        cur.execute(
+            "UPDATE answer_log SET test_id=? WHERE test_id=?",
+            (TEST_KLIMOV_SELF, _legacy_ddo_tid),
         )
         # Старый идентификатор текстового «логического» теста до замены на КОТ
         _legacy_logic_tid = "ra" + "ven"
@@ -713,6 +750,28 @@ def init_db():
             "UPDATE answer_log SET test_id=? WHERE test_id=?",
             (TEST_KOT, _legacy_logic_tid),
         )
+        # Старые суммы ДДО (ключи Ч-П …) несовместимы с новой таблицей самооценки (П … Ч).
+        cur.execute(
+            "SELECT user_id, scores_json, status FROM user_progress WHERE test_id=?",
+            (TEST_KLIMOV_SELF,),
+        )
+        _empty_klimov = json.dumps({k: 0 for k in KLIMOV_SELF_TYPES}, ensure_ascii=False)
+        for _uid, _sj, _st in cur.fetchall():
+            try:
+                _d = json.loads(_sj)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(_d, dict):
+                continue
+            if not any(x in _d for x in PROFESSION_TYPES):
+                continue
+            if (_st or "") == "in_progress":
+                cur.execute(
+                    "UPDATE user_progress SET scores_json=?, step=0 WHERE user_id=?",
+                    (_empty_klimov, int(_uid)),
+                )
+            else:
+                cur.execute("DELETE FROM user_progress WHERE user_id=?", (int(_uid),))
         conn.commit()
 
 
@@ -806,20 +865,18 @@ def get_progress(user_id: int):
             return None
         step, scores_json, status, test_id, reminder_pending, last_session_id = row
         scores = json.loads(scores_json)
-        tid = normalize_test_id(test_id or TEST_DDO)
+        tid = normalize_test_id(test_id or TEST_KLIMOV_SELF)
         rp = int(reminder_pending or 0)
         lsid = int(last_session_id) if last_session_id is not None else None
-        if tid == TEST_DDO and scores:
-            need = set(PROFESSION_TYPES.keys())
+        if tid == TEST_KLIMOV_SELF and scores:
+            need = set(KLIMOV_SELF_TYPES.keys())
             sk = set(scores.keys())
-            nq = len(QUESTIONS_DDO)
+            nq = len(QUESTIONS_KLIMOV_SELF)
             dirty = False
-            if sk != need or "Ч-С" in scores:
-                merged = empty_scores(TEST_DDO)
+            if sk != need:
+                merged = empty_scores(TEST_KLIMOV_SELF)
                 for k in need:
                     merged[k] = int(scores.get(k, 0) or 0)
-                if "Ч-С" in scores:
-                    merged["Ч-Т"] += int(scores["Ч-С"] or 0)
                 scores = merged
                 dirty = True
             if step > nq or step < 0:
@@ -828,7 +885,7 @@ def get_progress(user_id: int):
             if dirty:
                 save_progress(
                     user_id=user_id,
-                    test_id=TEST_DDO,
+                    test_id=TEST_KLIMOV_SELF,
                     step=step,
                     scores=scores,
                     status=status,
@@ -1076,17 +1133,25 @@ def _msk_day_start_end_ts() -> tuple[int, int]:
 def _parse_stats_export_period(text: str) -> tuple[str, int | None, int | None]:
     """
     Период выгрузки из текста сообщения.
-    По умолчанию — всё время (все строки в базе без фильтра по дате).
-    «Сегодня» / «за сегодня» — только записи за текущие сутки по МСК.
-    Возвращает (метка, since_ts, until_ts); until — невключительно.
+    Возвращает (метка, since_ts, until_ts); until — невключительно (SQL: created_at/finished_at >= since AND < until).
+    None, None — без фильтра (всё время).
+    Окна «неделя / месяц / квартал» — скользящие интервалы от текущего момента по московскому времени.
     """
-    blob = " ".join(
+    lines = [
         _strip_command_text(line)
         for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         if _strip_command_text(line)
-    ).lower()
+    ]
+    blob = " ".join(lines).lower()
     if not blob:
         return "all", None, None
+
+    def _rolling_since_until_sec(days: int) -> tuple[int, int]:
+        now = datetime.now(MSK_TZ)
+        until_excl = int(now.timestamp()) + 1
+        since = until_excl - int(days) * 86400
+        return since, until_excl
+
     day_tokens = (
         "сегодня",
         "за сегодня",
@@ -1099,6 +1164,52 @@ def _parse_stats_export_period(text: str) -> tuple[str, int | None, int | None]:
     if any(tok in blob for tok in day_tokens):
         a, b = _msk_day_start_end_ts()
         return "today_msk", a, b
+
+    all_time_markers = (
+        "отчет все время",
+        "отчёт все время",
+        "отчет за все время",
+        "отчёт за всё время",
+        "отчет за всё время",
+        "отчёт за все время",
+    )
+    if any(p in blob for p in all_time_markers):
+        return "all", None, None
+
+    quarter_markers = (
+        "отчет квартал",
+        "отчёт квартал",
+        "отчет за квартал",
+        "отчёт за квартал",
+        "за квартал",
+        "за 3 месяца",
+        "отчет за 3 месяца",
+        "отчёт за 3 месяца",
+    )
+    if any(p in blob for p in quarter_markers):
+        s, u = _rolling_since_until_sec(90)
+        return "quarter_90d", s, u
+
+    month_markers = (
+        "отчет месяц",
+        "отчёт месяц",
+        "отчет за месяц",
+        "отчёт за месяц",
+    )
+    if any(p in blob for p in month_markers) or blob.strip() == "за месяц":
+        s, u = _rolling_since_until_sec(30)
+        return "month_30d", s, u
+
+    week_markers = (
+        "отчет неделя",
+        "отчёт неделя",
+        "отчет за неделю",
+        "отчёт за неделю",
+    )
+    if any(p in blob for p in week_markers) or blob.strip() == "за неделю":
+        s, u = _rolling_since_until_sec(7)
+        return "week_7d", s, u
+
     return "all", None, None
 
 
@@ -1126,6 +1237,19 @@ def incomplete_sessions_row_count_filtered(since: int | None, until: int | None)
                 SELECT COUNT(*) FROM test_sessions
                 WHERE status != 'completed' AND started_at >= ? AND started_at < ?
                 """,
+                (since, until),
+            )
+        return int(cur.fetchone()[0])
+
+
+def answer_log_row_count_filtered(since: int | None, until: int | None) -> int:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        if since is None or until is None:
+            cur.execute("SELECT COUNT(*) FROM answer_log")
+        else:
+            cur.execute(
+                "SELECT COUNT(*) FROM answer_log WHERE created_at >= ? AND created_at < ?",
                 (since, until),
             )
         return int(cur.fetchone()[0])
@@ -1208,28 +1332,36 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
             v = int(scores.get(code, 0))
             lines.append(f"{HOLLAND_DIMENSIONS[code]}: {v} из {mx}.")
         return "\n".join(lines)
-    if tid == TEST_DDO:
+    if tid == TEST_KLIMOV_SELF:
+        if any(k in scores for k in PROFESSION_TYPES):
+            return (
+                "Архив: сохранён результат старого варианта (пары занятий, ключи Ч-П …). "
+                "Текущая методика — 30 утверждений самооценки (П … Ч). Пройдите тест заново для нового ключа.\n"
+                + json.dumps(scores, ensure_ascii=False)
+            )
         d_top = top3
         if not d_top:
             d_top = sorted(
-                ((k, int(scores.get(k, 0) or 0)) for k in DDO_DISPLAY_ORDER),
+                ((k, int(scores.get(k, 0) or 0)) for k in KLIMOV_SELF_DISPLAY_ORDER),
                 key=lambda x: x[1],
                 reverse=True,
             )[:3]
-        out_lines: list[str] = ["ДДО: топ-3 столбца по сумме баллов (максимум зависит от столбца, см. ниже):"]
+        out_lines: list[str] = [
+            "ДДО (самооценка по Климову): топ-3 столбца по сумме баллов (максимум по столбцу см. ниже):"
+        ]
         for i, (ptype, points) in enumerate(d_top, 1):
-            mx = DDO_MAX_BY_CATEGORY.get(ptype, 10)
+            mx = KLIMOV_SELF_MAX_BY_CATEGORY.get(ptype, 10)
             band = _ddo_interpret_band(int(points), mx)
             out_lines.append(
-                f"{i}. {PROFESSION_TYPES.get(ptype, ptype)} — {points} из {mx} ({band})"
+                f"{i}. {KLIMOV_SELF_TYPES.get(ptype, ptype)} — {points} из {mx} ({band})"
             )
         out_lines.append("")
-        out_lines.append("Все столбцы бланка:")
-        for pk in DDO_DISPLAY_ORDER:
+        out_lines.append("Все столбцы:")
+        for pk in KLIMOV_SELF_DISPLAY_ORDER:
             n = int(scores.get(pk, 0) or 0)
-            mx = DDO_MAX_BY_CATEGORY.get(pk, 10)
+            mx = KLIMOV_SELF_MAX_BY_CATEGORY.get(pk, 10)
             out_lines.append(
-                f"• {PROFESSION_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}"
+                f"• {KLIMOV_SELF_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}"
             )
         return "\n".join(out_lines)
     if tid == TEST_OPG:
@@ -1294,7 +1426,7 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
 
 def _test_title_for_export(test_id: str) -> str:
     return {
-        TEST_DDO: "ДДО (дифференциально-диагностический опросник)",
+        TEST_KLIMOV_SELF: LABEL_KLIMOV_SELF,
         TEST_OPG: LABEL_OPG,
         TEST_JOVASHI: LABEL_PROF_TABLE,
         TEST_YOVASHI: LABEL_YOVASHI,
@@ -1319,7 +1451,7 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
     ]
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "results"
+    ws.title = "сводка"
     ws.append(headers)
     with db_connect() as conn:
         cur = conn.cursor()
@@ -1377,11 +1509,35 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
             )
             answer_counts = {int(sid): int(c) for sid, c in cur.fetchall()}
 
+        if since is None or until is None:
+            cur.execute(
+                """
+                SELECT id, session_id, user_id, test_id, step_index, answer_key, question_text, answer_label,
+                       weights_json, created_at
+                FROM answer_log
+                ORDER BY created_at ASC, id ASC
+                """
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, session_id, user_id, test_id, step_index, answer_key, question_text, answer_label,
+                       weights_json, created_at
+                FROM answer_log
+                WHERE created_at >= ? AND created_at < ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (since, until),
+            )
+        answer_rows = cur.fetchall()
+
     all_uids: list[int] = []
     for row in result_rows:
         all_uids.append(int(row[1]))
     for row in session_rows:
         all_uids.append(int(row[1]))
+    for row in answer_rows:
+        all_uids.append(int(row[2]))
     name_by_uid = _fetch_vk_user_names(vk, all_uids)
 
     merged: list[tuple] = []
@@ -1407,7 +1563,7 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
     next_serial = 1
     for _, _, _, kind, uid, tid_raw, t_field, payload_a, payload_b, sid_maybe in merged:
         uid = int(uid)
-        tid = normalize_test_id((tid_raw or TEST_DDO) if isinstance(tid_raw, str) else TEST_DDO)
+        tid = normalize_test_id((tid_raw or TEST_KLIMOV_SELF) if isinstance(tid_raw, str) else TEST_KLIMOV_SELF)
         if uid not in user_serial:
             user_serial[uid] = next_serial
             next_serial += 1
@@ -1460,6 +1616,46 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
                     pass
             summary = "\n".join(parts)
         ws.append([no, link, display_name, test_name, finished_txt, dt, summary])
+
+    ws_ans = wb.create_sheet("ответы")
+    ans_headers = [
+        "id записи",
+        "Ссылка на пользователя",
+        "Имя и фамилия (ВК)",
+        "Название теста",
+        "session_id",
+        "step_index",
+        "answer_key",
+        "answer_label",
+        "question_text",
+        "weights_json",
+        "created_at_utc",
+    ]
+    ws_ans.append(ans_headers)
+    for ar in answer_rows:
+        _aid, _sid, _uid, _tid_raw, _step, _akey, _qtxt, _alab, _wjson, _cat = ar
+        _uid = int(_uid)
+        _tid = normalize_test_id((_tid_raw or TEST_KLIMOV_SELF) if isinstance(_tid_raw, str) else TEST_KLIMOV_SELF)
+        try:
+            _dt = datetime.utcfromtimestamp(int(_cat)).strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError, OSError):
+            _dt = ""
+        ws_ans.append(
+            [
+                int(_aid),
+                _vk_user_link(_uid),
+                name_by_uid.get(_uid, ""),
+                _test_title_for_export(_tid),
+                int(_sid),
+                int(_step),
+                str(_akey),
+                str(_alab),
+                str(_qtxt),
+                str(_wjson),
+                _dt,
+            ]
+        )
+
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
@@ -1474,18 +1670,36 @@ def send_stats_export(
     period_label: str = "all",
 ):
     period_label = period_label or "all"
-    if period_label == "today_msk":
+    pl = period_label
+
+    if pl == "today_msk":
+        period_human = "за сегодня (МСК)"
         n_done = test_results_row_count_filtered(since, until)
         n_open = incomplete_sessions_row_count_filtered(since, until)
-        period_human = "за сегодня (МСК)"
+    elif pl in ("week_7d", "month_30d", "quarter_90d"):
+        period_human = {
+            "week_7d": "за последние 7 суток",
+            "month_30d": "за последние 30 суток",
+            "quarter_90d": "за последние 90 суток (квартал)",
+        }[pl]
+        n_done = test_results_row_count_filtered(since, until)
+        n_open = incomplete_sessions_row_count_filtered(since, until)
     else:
+        since, until = None, None
+        period_human = "за всё время"
         n_done = test_results_row_count_filtered(None, None)
         n_open = incomplete_sessions_row_count_filtered(None, None)
-        since, until = None, None
-        period_human = "за всё время (все записи в базе)"
+
+    n_ans = answer_log_row_count_filtered(since, until)
 
     data = build_stats_excel_bytes(vk, since=since, until=until)
-    suffix = "today_msk" if period_label == "today_msk" else "all_time"
+    suffix = {
+        "today_msk": "today_msk",
+        "week_7d": "week",
+        "month_30d": "month",
+        "quarter_90d": "quarter",
+        "all": "all_time",
+    }.get(pl, "all_time")
     fname = f"stats_answers_{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
     bio.name = fname
@@ -1500,12 +1714,11 @@ def send_stats_export(
         att = saved
     att_str = f"doc{att['owner_id']}_{att['id']}"
     note = (
-        f"Excel ({period_human}): строки = завершённые тесты ({n_done}) + незавершённые сессии ({n_open}). "
-        "Колонка C — имя и фамилия из ВК (если токен не смог получить профиль, ячейка пустая). "
-        "Колонка «№» — порядковый номер пользователя (первое появление vk id в общей хронологии строк = новый номер). "
-        "Для незавершённых в «Дата» — время старта сессии; в «Итоги» — сколько шагов отвечено. "
-        "Пошаговые ответы в файл не выгружаются.\n"
-        "Период: по умолчанию — всё время; только за сегодня (МСК) — добавь в сообщение фразу «сегодня» или «за сегодня»."
+        f"Excel ({period_human}): лист «сводка» — завершённые тесты ({n_done}) + незавершённые сессии ({n_open}); "
+        f"лист «ответы» — все пошаговые ответы из журнала ({n_ans}).\n"
+        "Колонка C на сводке — имя и фамилия из ВК. Колонка «№» — порядковый номер пользователя по первому появлению в хронологии.\n"
+        "Команды: «отчет все время», «отчет квартал», «отчет месяц», «отчет неделя»; «сегодня» / «за сегодня» — только текущие сутки по МСК; "
+        "«выгрузка» или /stats — всё время."
     )
     vk.messages.send(
         peer_id=peer,
@@ -1523,8 +1736,8 @@ def handle_stats_command(vk, user_id: int, text: str) -> bool:
             "Выгрузка только для администраторов.\n\n"
             "Сделайте так: откройте Railway → ваш сервис → Variables → добавьте STATS_ADMIN_IDS = ваш числовой id ВК "
             "(только цифры, без пробелов). Id смотрите в ссылке на страницу vk.com/id… или через настройки. "
-            "Сохраните и Redeploy. Потом напишите боту одно слово: выгрузка или /stats — в таблицу попадут все данные за всё время. "
-            "Только за сегодня (по Москве) — добавь в сообщение «сегодня» или «за сегодня».",
+            "Сохраните и Redeploy. Команды выгрузки (только для админов): «отчет все время», «отчет квартал» (90 суток), "
+            "«отчет месяц» (30 суток), «отчет неделя» (7 суток); «выгрузка» или /stats — всё время; «сегодня» — только текущие сутки по МСК.",
         )
         return True
     try:
@@ -1649,7 +1862,7 @@ def build_reminder_continue_keyboard():
 
 def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
-    kb.add_button("ДДО", color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_KLIMOV_SELF, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_OPG, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_HOLLAND, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
@@ -1782,7 +1995,7 @@ def _interpret_jovashi(score: int) -> str:
 def _label_for_test(test_id: str) -> str:
     tid = normalize_test_id(test_id)
     return {
-        TEST_DDO: "ДДО (дифференциально-диагностический опросник)",
+        TEST_KLIMOV_SELF: LABEL_KLIMOV_SELF,
         TEST_OPG: LABEL_OPG,
         TEST_JOVASHI: LABEL_PROF_TABLE,
         TEST_YOVASHI: LABEL_YOVASHI,
@@ -1844,22 +2057,25 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
     top3 = sorted_types[:3]
     best_key = top3[0][0]
 
-    if tid == TEST_DDO:
-        title = "📊 Ваш результат по тесту ДДО (классический бланк Климова; в боте 5 типов, «сам человек» в сумме с «человек–техника»):"
+    if tid == TEST_KLIMOV_SELF:
+        title = (
+            "📊 Результат по ДДО (ориентировочное определение типа будущей специальности по самооценке; "
+            "столбцы П, Т, З, Х, Ч):"
+        )
         lines = [title, ""]
-        for pk in DDO_DISPLAY_ORDER:
+        for pk in KLIMOV_SELF_DISPLAY_ORDER:
             n = int(scores.get(pk, 0) or 0)
-            mx = DDO_MAX_BY_CATEGORY.get(pk, 10)
-            lines.append(f"• {PROFESSION_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}")
+            mx = KLIMOV_SELF_MAX_BY_CATEGORY.get(pk, 10)
+            lines.append(f"• {KLIMOV_SELF_TYPES[pk]}: {n} из {mx} — {_ddo_interpret_band(n, mx)}")
         lines.append("")
         lines.append("Топ-3 по сумме баллов:")
         for i, (ptype, points) in enumerate(top3, 1):
-            mx = DDO_MAX_BY_CATEGORY.get(ptype, 10)
+            mx = KLIMOV_SELF_MAX_BY_CATEGORY.get(ptype, 10)
             lines.append(
-                f"{i}. {PROFESSION_TYPES[ptype]} — {points} из {mx} ({_ddo_interpret_band(int(points), mx)})"
+                f"{i}. {KLIMOV_SELF_TYPES[ptype]} — {points} из {mx} ({_ddo_interpret_band(int(points), mx)})"
             )
         lines.append(
-            f"\n{CAREER_HINTS_DDO.get(best_key, 'Выберите направление, которое откликается сильнее.')}"
+            f"\n{CAREER_HINTS_KLIMOV_SELF.get(best_key, 'Выберите направление, которое откликается сильнее.')}"
         )
         lines.append("\nХотите пройти снова — выберите тест кнопкой или командой.")
     elif tid == TEST_JOVASHI:
@@ -2381,6 +2597,22 @@ def _line_is_export_alias(line: str) -> bool:
         "отчет",
         "отчёт по ответам",
         "отчет по ответам",
+        "отчет все время",
+        "отчёт все время",
+        "отчет за все время",
+        "отчёт за всё время",
+        "отчет квартал",
+        "отчёт квартал",
+        "отчет за квартал",
+        "отчёт за квартал",
+        "отчет месяц",
+        "отчёт месяц",
+        "отчет за месяц",
+        "отчёт за месяц",
+        "отчет неделя",
+        "отчёт неделя",
+        "отчет за неделю",
+        "отчёт за неделю",
         "данные",
         "список ответов",
         "экспорт",
@@ -2407,12 +2639,31 @@ def _is_stats_command(text: str) -> bool:
         if _line_is_export_alias(ln):
             return True
     blob = " ".join(chunks)
+    low = blob.lower()
+    period_markers = (
+        "отчет все время",
+        "отчёт все время",
+        "отчет квартал",
+        "отчёт квартал",
+        "отчет месяц",
+        "отчёт месяц",
+        "отчет неделя",
+        "отчёт неделя",
+        "отчет за квартал",
+        "отчет за месяц",
+        "отчет за неделю",
+        "за квартал",
+        "за 3 месяца",
+    )
+    if any(p in low for p in period_markers):
+        return True
+    if low.strip() in ("за месяц", "за неделю", "за квартал", "за 3 месяца"):
+        return True
     if _token_is_stats(blob):
         return True
     for part in blob.split():
         if _token_is_stats(part):
             return True
-    low = blob.lower()
     if re.search(r"(?:^|[\s\n\u00a0])[/!?.]?\s*stats(?:@|[\s,;.]|$)", low):
         return True
     if re.search(r"(?:^|[\s\n\u00a0])стат(?:истика)?(?:[\s,;.]|$)", low):
@@ -2478,8 +2729,8 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if stripped == "Меню":
         send_welcome(vk, user_id)
         return True
-    if t in ("ддо",):
-        start_test(vk, user_id, TEST_DDO)
+    if t in ("климов", "самооценка", "климов30", "ддо"):
+        start_test(vk, user_id, TEST_KLIMOV_SELF)
         return True
     if t in ("опг", "opg"):
         start_test(vk, user_id, TEST_OPG)
@@ -2510,8 +2761,8 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         start_test(vk, user_id, TEST_HOLLAND_RIASEC)
         return True
     # Подписи с клавиатуры (с заглавной)
-    if stripped == "ДДО":
-        start_test(vk, user_id, TEST_DDO)
+    if stripped == KB_KLIMOV_SELF:
+        start_test(vk, user_id, TEST_KLIMOV_SELF)
         return True
     if stripped == KB_OPG:
         start_test(vk, user_id, TEST_OPG)
