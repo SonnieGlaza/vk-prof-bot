@@ -11,13 +11,30 @@
 4. Хранение данных (выберите один вариант):
 
    A) PostgreSQL (рекомендуется, если уже создали БД на Railway)
-      - В проекте: сервис Postgres + сервис бота.
-      - В сервисе бота → Variables → New Variable → Reference → выберите Postgres → DATABASE_URL.
-      - Перенос старых данных из SQLite (файл career_bot.db или /data/career_bot.db):
-        railway link
-        railway run python scripts/migrate_sqlite_to_postgres.py --sqlite /путь/к/career_bot.db
-        (локально: export DATABASE_URL=... из вкладки Connect у Postgres, затем тот же скрипт с --sqlite career_bot.db)
-      - Redeploy бота. В логах должно быть: [db] PostgreSQL (DATABASE_URL)
+
+      ⚠ Данные только в работающем контейнере (без тома) — СНАЧАЛА снимите копию, ПОТОМ redeploy:
+
+      1) railway link  → выберите проект и сервис БОТА (не Postgres).
+      2) Найти файл и проверить объём:
+         railway run python scripts/find_sqlite_db.py
+         (часто: career_bot.db в корне приложения или SQLITE_PATH=/data/career_bot.db)
+      3) Скопировать БД на машину (подставьте путь из шага 2):
+         railway run sh -c 'cat /app/career_bot.db' > career_bot.db
+         или: railway run sh -c 'cat /data/career_bot.db' > career_bot.db
+         (если путь другой — смотрите вывод find_sqlite_db.py)
+      4) Локально перенести в Postgres:
+         export DATABASE_URL='...'   # Connect у сервиса Postgres
+         pip install psycopg2-binary
+         python scripts/migrate_sqlite_to_postgres.py --sqlite career_bot.db
+      5) В сервисе бота → Variables → Reference → Postgres → DATABASE_URL.
+      6) Redeploy бота. В логах: db=PostgreSQL (DATABASE_URL)
+
+      Альтернатива без скачивания на ПК (если run видит тот же контейнер):
+         railway run python scripts/migrate_sqlite_to_postgres.py --sqlite /app/career_bot.db
+         (нужны DATABASE_URL и Reference в Variables сервиса бота до run)
+
+      Обычный перенос (файл уже есть на диске / томе):
+        railway run python scripts/migrate_sqlite_to_postgres.py --sqlite /data/career_bot.db
 
    B) SQLite на томе (без Postgres)
       - New → Volume → mount /data
