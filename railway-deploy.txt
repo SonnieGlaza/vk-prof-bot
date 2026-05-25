@@ -8,9 +8,29 @@
    VK_TOKEN     — ключ доступа сообщества (управление → API → ключи).
    VK_GROUP_ID  — ID группы (целое число, как в коде VkBotLongPoll).
 
-4. Опционально SQLITE_PATH=/data/career_bot.db — если добавишь Volume:
-   New → Volume → примонтируй к /data, чтобы база не терялась при redeploy.
+4. Хранение данных (выберите один вариант):
 
-5. Deploy: Nixpacks подхватит requirements.txt и runtime.txt; старт из railway.toml: python bot.py.
+   A) PostgreSQL (рекомендуется, если уже создали БД на Railway)
+      - В проекте: сервис Postgres + сервис бота.
+      - В сервисе бота → Variables → New Variable → Reference → выберите Postgres → DATABASE_URL.
+      - Перенос старых данных из SQLite (файл career_bot.db или /data/career_bot.db):
+        railway link
+        railway run python scripts/migrate_sqlite_to_postgres.py --sqlite /путь/к/career_bot.db
+        (локально: export DATABASE_URL=... из вкладки Connect у Postgres, затем тот же скрипт с --sqlite career_bot.db)
+      - Redeploy бота. В логах должно быть: [db] PostgreSQL (DATABASE_URL)
 
-6. Логи: вкладка Deployments → View logs. Ошибка «Не задан VK_TOKEN» — переменные не заданы в этом сервисе.
+   B) SQLite на томе (без Postgres)
+      - New → Volume → mount /data
+      - SQLITE_PATH=/data/career_bot.db
+      - Скопируйте существующий career_bot.db в /data (через railway shell / одноразовый run).
+
+5. STATS_ADMIN_IDS, STATS_EXPORT_SECRET — по желанию (см. .env.example).
+
+6. Deploy: Nixpacks подхватит requirements.txt; старт: python bot.py.
+
+7. Логи: Deployments → View logs.
+
+Как смотреть БД на Railway
+- Postgres: сервис БД → Data (таблицы) или Connect → psql / внешний клиент (TablePlus, DBeaver) по DATABASE_URL.
+- Таблицы бота: user_progress, test_results, test_sessions, answer_log, longpoll_incoming_dedup.
+- SQLite на томе: railway shell в сервисе бота → sqlite3 /data/career_bot.db → .tables / SELECT COUNT(*) FROM test_results;

@@ -3,7 +3,6 @@ import io
 import json
 import os
 import re
-import sqlite3
 import threading
 import time
 import unicodedata
@@ -15,6 +14,17 @@ import vk_api
 from vk_api.bot_longpoll import CHAT_START_ID, VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.upload import VkUpload
+
+from db_backend import (
+    DB_PATH,
+    USE_PG,
+    backend_label,
+    db_connect,
+    ensure_column,
+    insert_returning_id,
+    pg_ddl_init,
+    table_column_names,
+)
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -43,9 +53,7 @@ STATS_DEBUG = (os.environ.get("STATS_DEBUG") or "").strip().lower() in ("1", "tr
 # Секретная фраза (см. _stats_secret_matches после определения _strip_command_text)
 _STATS_EXPORT_SECRET_RAW = (os.environ.get("STATS_EXPORT_SECRET") or "").strip()
 
-# SQLite: на Railway смонтируй том (например /data) и задай SQLITE_PATH=/data/career_bot.db
-_DB_DEFAULT = os.path.join(_BASE, "career_bot.db")
-DB_PATH = (os.environ.get("SQLITE_PATH") or os.environ.get("DB_PATH") or _DB_DEFAULT).strip() or _DB_DEFAULT
+# SQLite: SQLITE_PATH=/data/career_bot.db (том Railway). PostgreSQL: DATABASE_URL из сервиса БД.
 KLIMOV_SELF_PATH = os.path.join(_BASE, "klimov_self_table_questions.json")
 OPG_PATH = os.path.join(_BASE, "opg_questions.json")
 JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
@@ -608,95 +616,86 @@ def empty_scores(test_id: str) -> dict:
     return {}
 
 
-def db_connect():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
-
-def _ensure_column(conn, table: str, column: str, ddl_suffix: str):
-    cur = conn.cursor()
-    cur.execute(f"PRAGMA table_info({table})")
-    names = {row[1] for row in cur.fetchall()}
-    if column not in names:
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_suffix}")
-
-
 def init_db():
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_progress (
-                user_id INTEGER PRIMARY KEY,
-                step INTEGER NOT NULL,
-                scores_json TEXT NOT NULL,
-                status TEXT NOT NULL,
-                started_at INTEGER NOT NULL,
-                last_activity_at INTEGER NOT NULL,
-                reminded_at INTEGER,
-                test_id TEXT NOT NULL DEFAULT 'klimov_self',
-                reminder_pending INTEGER NOT NULL DEFAULT 0
+        if USE_PG:
+            pg_ddl_init(cur, _LP_DEDUP_TBL)
+        else:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_progress (
+                    user_id INTEGER PRIMARY KEY,
+                    step INTEGER NOT NULL,
+                    scores_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at INTEGER NOT NULL,
+                    last_activity_at INTEGER NOT NULL,
+                    reminded_at INTEGER,
+                    test_id TEXT NOT NULL DEFAULT 'klimov_self',
+                    reminder_pending INTEGER NOT NULL DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS test_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                finished_at INTEGER NOT NULL,
-                scores_json TEXT NOT NULL,
-                top3_json TEXT NOT NULL,
-                best_type TEXT NOT NULL,
-                test_id TEXT NOT NULL DEFAULT 'klimov_self'
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS test_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    finished_at INTEGER NOT NULL,
+                    scores_json TEXT NOT NULL,
+                    top3_json TEXT NOT NULL,
+                    best_type TEXT NOT NULL,
+                    test_id TEXT NOT NULL DEFAULT 'klimov_self'
+                )
+                """
             )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS test_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                test_id TEXT NOT NULL,
-                started_at INTEGER NOT NULL,
-                completed_at INTEGER,
-                status TEXT NOT NULL DEFAULT 'in_progress',
-                final_scores_json TEXT
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS test_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    test_id TEXT NOT NULL,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    status TEXT NOT NULL DEFAULT 'in_progress',
+                    final_scores_json TEXT
+                )
+                """
             )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS answer_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                test_id TEXT NOT NULL,
-                step_index INTEGER NOT NULL,
-                answer_key TEXT NOT NULL,
-                question_text TEXT NOT NULL,
-                answer_label TEXT NOT NULL,
-                weights_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES test_sessions(id)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS answer_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    test_id TEXT NOT NULL,
+                    step_index INTEGER NOT NULL,
+                    answer_key TEXT NOT NULL,
+                    question_text TEXT NOT NULL,
+                    answer_label TEXT NOT NULL,
+                    weights_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES test_sessions(id)
+                )
+                """
             )
-            """
-        )
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_session ON answer_log(session_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_user ON answer_log(user_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON test_sessions(user_id)")
-        cur.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {_LP_DEDUP_TBL} (
-                dedup_key TEXT PRIMARY KEY,
-                seen_at INTEGER NOT NULL
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_session ON answer_log(session_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_answer_log_user ON answer_log(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON test_sessions(user_id)")
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {_LP_DEDUP_TBL} (
+                    dedup_key TEXT PRIMARY KEY,
+                    seen_at INTEGER NOT NULL
+                )
+                """
             )
-            """
-        )
-        _ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
-        _ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "user_progress", "last_session_id", "INTEGER")
-        _ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
-        _ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "user_progress", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
+        ensure_column(conn, "user_progress", "reminder_pending", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "user_progress", "last_session_id", "INTEGER")
+        ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
+        ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
             "UPDATE user_progress SET test_id=? WHERE test_id=?",
             (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
@@ -1018,7 +1017,8 @@ def create_test_session(user_id: int, test_id: str) -> int:
     ts = now_ts()
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute(
+        sid = insert_returning_id(
+            cur,
             """
             INSERT INTO test_sessions (user_id, test_id, started_at, status)
             VALUES (?, ?, ?, 'in_progress')
@@ -1026,7 +1026,7 @@ def create_test_session(user_id: int, test_id: str) -> int:
             (user_id, test_id, ts),
         )
         conn.commit()
-        return int(cur.lastrowid)
+        return int(sid)
 
 
 def log_answer_row(
@@ -1765,8 +1765,7 @@ def save_result(user_id: int, test_id: str, scores: dict, top3: list):
     top3_json = json.dumps(top3, ensure_ascii=False)
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute("PRAGMA table_info(test_results)")
-        col_names = {row[1] for row in cur.fetchall()}
+        col_names = table_column_names(conn, "test_results")
         row = {
             "user_id": user_id,
             "finished_at": ts,
@@ -2808,7 +2807,7 @@ def main():
     longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=LONGPOLL_WAIT_SEC)
     print(
         f"Бот запущен: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-        f"group_id={GROUP_ID} | STATS_ADMIN_IDS={len(STATS_ADMIN_IDS)} | "
+        f"group_id={GROUP_ID} | db={backend_label()} | STATS_ADMIN_IDS={len(STATS_ADMIN_IDS)} | "
         f"secret={'да' if _STATS_EXPORT_SECRET_RAW else 'нет'}"
     )
     while True:
