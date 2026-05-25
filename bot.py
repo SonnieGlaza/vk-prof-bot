@@ -1271,6 +1271,48 @@ def _vk_user_link(user_id: int) -> str:
     return f"https://vk.com/id{user_id}"
 
 
+def _loads_json_blob(raw, default=None):
+    if default is None:
+        default = {}
+    if raw is None:
+        return default
+    if isinstance(raw, (dict, list)):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return default
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        return default
+
+
+def _upload_stats_document(vk, bio: io.BytesIO, fname: str, peer_id: int) -> str:
+    """Загружает xlsx в VK, возвращает attachment doc{owner}_{id}."""
+    bio.seek(0)
+    upload = VkUpload(vk)
+    try:
+        saved = upload.document_message(bio, title=fname, peer_id=peer_id)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            "VK upload: пустой или неверный ответ (обычно нет права «Документы» у ключа сообщества "
+            "или сбой docs.getMessagesUploadServer). Перевыпустите ключ с правами: сообщения + документы."
+        ) from e
+    except Exception as e:
+        err = str(e)
+        if "Expecting value" in err or "JSONDecodeError" in err:
+            raise RuntimeError(
+                "VK upload: не удалось разобрать ответ сервера (проверьте права ключа: сообщения + документы)."
+            ) from e
+        raise
+    if isinstance(saved, list) and saved:
+        saved = saved[0]
+    att = saved.get("doc") if isinstance(saved, dict) and "doc" in saved else saved
+    if not isinstance(att, dict) or att.get("owner_id") is None or att.get("id") is None:
+        raise RuntimeError(f"VK upload: неожиданный ответ {saved!r}")
+    return f"doc{att['owner_id']}_{att['id']}"
+
+
 def _fetch_vk_user_names(vk, user_ids: list[int]) -> dict[int, str]:
     """Имя и фамилия из VK API (батчами). При ошибке или без vk — пустые строки."""
     out: dict[int, str] = {}
@@ -1575,11 +1617,10 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
                 dt = datetime.utcfromtimestamp(int(t_field)).strftime("%Y-%m-%d %H:%M:%S")
             except (TypeError, ValueError, OSError):
                 dt = ""
-            try:
-                scores = json.loads(payload_a) if payload_a else {}
-                top3 = json.loads(payload_b) if payload_b else []
-            except json.JSONDecodeError:
-                scores, top3 = {}, []
+            scores = _loads_json_blob(payload_a, {})
+            top3 = _loads_json_blob(payload_b, [])
+            if not isinstance(top3, list):
+                top3 = []
             summary = _export_result_summary(tid, scores, top3)
         else:
             sess_status = str(payload_a or "")
@@ -1604,14 +1645,11 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
                 total_q = 0
             parts = [f"Сессия {sid}, {status_ru}. Отвечено шагов: {n_ans}" + (f" из {total_q}." if total_q else ".")]
             if payload_b:
-                try:
-                    scores = json.loads(payload_b)
-                    if isinstance(scores, dict) and scores:
-                        extra = _export_result_summary(tid, scores, _top3_from_scores(scores))
-                        if extra:
-                            parts.append(f"Накоплено по ответам: {extra}")
-                except json.JSONDecodeError:
-                    pass
+                scores = _loads_json_blob(payload_b, {})
+                if isinstance(scores, dict) and scores:
+                    extra = _export_result_summary(tid, scores, _top3_from_scores(scores))
+                    if extra:
+                        parts.append(f"Накоплено по ответам: {extra}")
             summary = "\n".join(parts)
         ws.append([no, link, display_name, test_name, finished_txt, dt, summary])
 
@@ -1701,16 +1739,9 @@ def send_stats_export(
     fname = f"stats_answers_{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     bio = io.BytesIO(data)
     bio.name = fname
-    upload = VkUpload(vk)
     peer = _peer_id_for_send(user_id)
-    saved = upload.document_message(bio, title=fname, peer_id=peer)
-    if isinstance(saved, list) and saved:
-        saved = saved[0]
-    if isinstance(saved, dict) and "doc" in saved:
-        att = saved["doc"]
-    else:
-        att = saved
-    att_str = f"doc{att['owner_id']}_{att['id']}"
+    print(f"[stats_export] peer_id={peer} size={len(data)} rows_ans={n_ans}")
+    att_str = _upload_stats_document(vk, bio, fname, peer)
     note = (
         f"Excel ({period_human}): лист «сводка» — завершённые тесты ({n_done}) + незавершённые сессии ({n_open}); "
         f"лист «ответы» — все пошаговые ответы из журнала ({n_ans}).\n"
@@ -1748,12 +1779,17 @@ def handle_stats_command(vk, user_id: int, text: str) -> bool:
             period_label=period_label,
         )
     except Exception as e:
-        print(f"[handle_stats_command] {e}")
-        send_message(
-            vk,
-            user_id,
-            f"Не удалось отправить файл. Проверь права токена (сообщения + документы). Ошибка: {e}",
+        print(f"[handle_stats_command] {e!r}")
+        hint = (
+            "Не удалось отправить Excel.\n\n"
+            "Чаще всего: у ключа сообщества нет права «Документы» (docs) — VK отвечает пустой страницей, "
+            "отсюда «Expecting value…».\n"
+            "Сообщество → Управление → Работа с API → Ключи → создать ключ с доступом: "
+            "«Сообщения сообщества» + «Документы» (и «Управление сообществом»). "
+            "Подставьте новый VK_TOKEN в Railway → Redeploy.\n\n"
+            f"Технически: {e}"
         )
+        send_message(vk, user_id, hint)
     return True
 
 
