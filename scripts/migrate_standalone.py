@@ -134,6 +134,8 @@ def _reset_serial(pg, table: str):
     cur = pg.cursor()
     cur.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}")
     max_id = int(cur.fetchone()[0])
+    if max_id < 1:
+        return
     cur.execute(
         "SELECT setval(pg_get_serial_sequence(%s, 'id'), %s, true)",
         (table, max_id),
@@ -176,7 +178,21 @@ def main():
             if _sqlite_has(sq, table):
                 _reset_serial(pg, table)
         pg.commit()
+        cur_chk = pg.cursor()
+        pg_total = 0
+        for t in _TABLES:
+            if _sqlite_has(sq, t):
+                cur_chk.execute(f"SELECT COUNT(*) FROM {t}")
+                n = int(cur_chk.fetchone()[0])
+                pg_total += n
+                print(f"  Postgres {t}: {n}")
         print("Готово.")
+        if pg_total == 0:
+            print(
+                "Внимание: в SQLite и Postgres нет строк в основных таблицах. "
+                "Проверьте career_bot.db командой из инструкции.",
+                file=sys.stderr,
+            )
     finally:
         sq.close()
         pg.close()
