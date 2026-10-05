@@ -19,7 +19,7 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urljoin
 
 import requests
 
@@ -210,18 +210,17 @@ class MaxApiCompat:
                 self.vk_api = self._vk_session.get_api()
             except Exception:
                 log.exception("Не удалось инициализировать VK API для имён в сводной выгрузке")
-
     def _request(self, method, endpoint, **kwargs):
-        url = f"{self.base_url}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
-    
+    # Используем urljoin — это штатный и самый безопасный способ склеить base + path
+        url = urljoin(self.base_url.rstrip('/'), endpoint.lstrip('/'))
+
     # Явно указываем путь к сертификатам из пакета certifi
-    # Это работает даже если ENV-переменные не подхватились
         cert_path = certifi.where()
-    
+
         response = requests.request(
             method=method,
             url=url,
-            verify=cert_path,  # <-- ключевое изменение
+            verify=cert_path,
             **kwargs
         )
         return response
