@@ -212,7 +212,7 @@ class MaxApiCompat:
                 log.exception("Не удалось инициализировать VK API для имён в сводной выгрузке")
 
     def _request(self, method, endpoint, **kwargs):
-        url = f"{self.base_url}{endpoint}"
+        url = f"{self.base_url}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
     
     # Явно указываем путь к сертификатам из пакета certifi
     # Это работает даже если ENV-переменные не подхватились
