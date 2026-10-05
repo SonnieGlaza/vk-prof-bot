@@ -653,7 +653,15 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if urlparse(self.path).path == "/health":
-            _write_json(self, 200, {"ok": True})
+            _write_json(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "version": _MAX_BOT_VERSION,
+                    "db": "postgres" if core.USE_PG else "sqlite",
+                },
+            )
         else:
             _write_json(self, 404, {"error": "not found"})
 
