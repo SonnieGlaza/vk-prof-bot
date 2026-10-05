@@ -27,6 +27,9 @@ import bot as core
 log = logging.getLogger("max_bot")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 
+# Маркер версии: по логам ботхоста сразу видно, какая сборка запущена.
+_MAX_BOT_VERSION = "CA+Supabase+tracing (2026-10-05)"
+
 MAX_API_BASE = (os.getenv("MAX_API_BASE") or "https://platform-api2.max.ru").rstrip("/")
 MAX_BOT_TOKEN = (os.getenv("MAX_BOT_TOKEN") or "").strip()
 
@@ -719,6 +722,7 @@ def _register_webhook(api: MaxApiCompat) -> None:
 
 
 def main() -> None:
+    log.info("[MAX] version: %s", _MAX_BOT_VERSION)
     if not MAX_BOT_TOKEN:
         raise SystemExit("Set MAX_BOT_TOKEN in the MAX Railway service variables")
     if not MAX_WEBHOOK_URL or not MAX_WEBHOOK_SECRET:
