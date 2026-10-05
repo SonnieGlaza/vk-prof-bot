@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Обновляем системный CA-bundle (это полезно для других утилит, но не обязательно для requests)
 RUN update-ca-certificates
-RUN cat full_certs.pem >> /etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
