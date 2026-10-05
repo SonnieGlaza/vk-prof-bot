@@ -585,6 +585,38 @@ def _finish_update(update_key: str, status: str, error: str | None = None) -> No
         conn.commit()
 
 
+def _process_update_inline(api: MaxApiCompat, update: dict) -> None:
+    """Синхронная обработка вебхука в потоке HTTP — без фазы очереди, ответ быстрее.
+
+    Строка пишется сразу со статусом processing → done/failed. Если процесс
+    умрёт посреди обработки, при старте строка вернётся в pending и воркер
+    дообработает её (страховка от потери).
+    """
+    key = _stable_update_key(update)
+    try:
+        with _db_session() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO max_webhook_queue(update_key, received_at, payload_json, status) "
+                "VALUES (?, ?, ?, 'processing') ON CONFLICT(update_key) DO NOTHING",
+                (key, int(time.time() * 1000), json.dumps(update, ensure_ascii=False)),
+            )
+            conn.commit()
+    except Exception:
+        log.exception("[MAX] could not mark update processing; key=%s", key)
+
+    t0 = time.monotonic()
+    status: str = "done"
+    error: str | None = None
+    try:
+        _dispatch_max_update(api, update)
+    except Exception as exc:
+        status, error = "failed", type(exc).__name__
+        log.exception("MAX update failed; key=%s", key)
+    _finish_update(key, status, error)
+    log.info("[MAX] processed in %.0f ms (%s)", (time.monotonic() - t0) * 1000, status)
+
+
 def _dedup_max_message(chat_id: int, message_id: int) -> bool:
     # Негативный peer namespace не пересекается с positive VK peer_id в общей dedup-таблице.
     with _db_session() as conn:
@@ -731,6 +763,8 @@ def _write_json(handler: BaseHTTPRequestHandler, code: int, body: dict) -> None:
 
 
 class MaxWebhookHandler(BaseHTTPRequestHandler):
+    api: "MaxApiCompat | None" = None
+
     def log_message(self, fmt, *args):
         log.info("MAX webhook %s", fmt % args)
 
@@ -767,7 +801,7 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
                 raw_body[:300].decode("utf-8", "replace"),
             )
             if update_type in ("message_created", "bot_started"):
-                _enqueue_update(update)
+                _process_update_inline(self.api, update)
             _write_json(self, 200, {"ok": True})
         except Exception:
             log.exception("Invalid or unpersistable MAX webhook request")
@@ -816,6 +850,7 @@ def main() -> None:
     core.init_db()
     _ensure_max_tables()
     api = MaxApiCompat(MAX_BOT_TOKEN)
+    MaxWebhookHandler.api = api
     server = ThreadingHTTPServer(("0.0.0.0", int(os.getenv("PORT", "8000"))), MaxWebhookHandler)
     threading.Thread(target=server.serve_forever, name="max-webhook-http", daemon=True).start()
     threading.Thread(target=_max_update_worker, args=(api,), name="max-update-worker", daemon=True).start()
