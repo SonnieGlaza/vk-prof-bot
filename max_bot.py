@@ -155,6 +155,87 @@ def _build_ca_bundle() -> str | bool:
 
 
 MAX_CA_BUNDLE = _build_ca_bundle()
+
+# --- Переиспользование PG-соединения: ответ бота без нового TLS-рукопожатия
+# на каждый запрос к БД (основная задержка на Supabase из-за RTT). ---
+from db_backend import USE_PG as _DB_USE_PG  # noqa: E402
+from db_backend import _Cursor as _DB_Cursor  # noqa: E402
+
+_db_conn = None
+_db_conn_lock = threading.Lock()
+
+
+def _db_conn_locked():
+    """Соединение PG (вызывать под _db_conn_lock)."""
+    global _db_conn
+    if _db_conn is None or _db_conn.closed:
+        import psycopg2
+
+        url = urlparse(os.getenv("DATABASE_URL") or "")
+        _db_conn = psycopg2.connect(
+            host=url.hostname,
+            port=url.port,
+            user=url.username,
+            password=url.password,
+            dbname=url.path.lstrip("/"),
+            sslmode="require",
+            connect_timeout=10,
+        )
+    return _db_conn
+
+
+class _DbSession:
+    """Контекст с переиспользуемым соединением; API как у core.db_connect()."""
+
+    def __init__(self):
+        self._conn = None
+
+    def __enter__(self):
+        _db_conn_lock.acquire()
+        try:
+            self._conn = _db_conn_locked()
+            self._conn.rollback()
+        except Exception:
+            _db_conn_lock.release()
+            raise
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            _db_conn_lock.release()
+        except Exception:
+            pass
+        return False
+
+    def cursor(self):
+        return _DB_Cursor(self._conn.cursor(), True)
+
+    def execute(self, statement: str, params=None):
+        cur = self.cursor()
+        cur.execute(statement, params)
+        return cur
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
+
+def _db_session():
+    """Сессия БД: переиспользуемое PG-соединение или обычный SQLite."""
+    if not _DB_USE_PG:
+        return core.db_connect()
+    return _DbSession()
+
+
 MAX_WEBHOOK_URL = (os.getenv("MAX_WEBHOOK_URL") or "").strip()
 MAX_WEBHOOK_PATH = urlparse(MAX_WEBHOOK_URL).path if MAX_WEBHOOK_URL else "/max/webhook"
 MAX_WEBHOOK_SECRET = (os.getenv("MAX_WEBHOOK_SECRET") or "").strip()
@@ -426,7 +507,7 @@ def _remember_max_user(user: dict) -> int:
     first = str(user.get("first_name") or "")
     last = str(user.get("last_name") or "")
     username = str(user.get("username") or "")
-    with core.db_connect() as conn:
+    with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO max_user_map(max_user_id, first_name, last_name, username, updated_at)
@@ -458,7 +539,7 @@ def _stable_update_key(update: dict) -> str:
 
 def _enqueue_update(update: dict) -> None:
     key = _stable_update_key(update)
-    with core.db_connect() as conn:
+    with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO max_webhook_queue(update_key, received_at, payload_json, status)
@@ -472,7 +553,7 @@ def _enqueue_update(update: dict) -> None:
 
 
 def _claim_next_update():
-    with core.db_connect() as conn:
+    with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT update_key, payload_json FROM max_webhook_queue "
@@ -495,7 +576,7 @@ def _claim_next_update():
 
 
 def _finish_update(update_key: str, status: str, error: str | None = None) -> None:
-    with core.db_connect() as conn:
+    with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             "UPDATE max_webhook_queue SET status=?, payload_json='', last_error=? WHERE update_key=?",
@@ -506,7 +587,7 @@ def _finish_update(update_key: str, status: str, error: str | None = None) -> No
 
 def _dedup_max_message(chat_id: int, message_id: int) -> bool:
     # Негативный peer namespace не пересекается с positive VK peer_id в общей dedup-таблице.
-    with core.db_connect() as conn:
+    with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             "INSERT OR IGNORE INTO longpoll_incoming_dedup(dedup_key, seen_at) VALUES (?, ?)",
@@ -594,9 +675,11 @@ def _max_update_worker(api: MaxApiCompat) -> None:
             MAX_QUEUE_WAKE.clear()
             continue
         update_key, update = row
+        t0 = time.monotonic()
         try:
             _dispatch_max_update(api, update)
             _finish_update(update_key, "done")
+            log.info("[MAX] processed in %.0f ms", (time.monotonic() - t0) * 1000)
         except Exception as exc:
             log.exception("MAX update failed; key=%s", update_key)
             try:
@@ -653,15 +736,7 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if urlparse(self.path).path == "/health":
-            _write_json(
-                self,
-                200,
-                {
-                    "ok": True,
-                    "version": _MAX_BOT_VERSION,
-                    "db": "postgres" if core.USE_PG else "sqlite",
-                },
-            )
+            _write_json(self, 200, {"ok": True})
         else:
             _write_json(self, 404, {"error": "not found"})
 
