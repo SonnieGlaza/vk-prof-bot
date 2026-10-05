@@ -541,9 +541,13 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
 
 
 def _register_webhook(api: MaxApiCompat) -> None:
+    log.info(f"[DEBUG] MAX_WEBHOOK_URL raw = '{MAX_WEBHOOK_URL}'")
     parsed = urlparse(MAX_WEBHOOK_URL)
+    log.info(f"[DEBUG] parsed.scheme = '{parsed.scheme}', parsed.port = {parsed.port}, parsed.hostname = '{parsed.hostname}'")
+
     if parsed.scheme != "https" or parsed.port not in (None, 443) or not parsed.hostname:
         raise RuntimeError("MAX_WEBHOOK_URL должен быть публичным HTTPS-адресом на порту 443")
+        
     if not re.fullmatch(r"[A-Za-z0-9_-]{5,256}", MAX_WEBHOOK_SECRET):
         raise RuntimeError("MAX_WEBHOOK_SECRET: используйте 5–256 символов A-Z, a-z, 0-9, _ или -")
     existing = api._request("GET", "subscriptions").json().get("subscriptions", [])
