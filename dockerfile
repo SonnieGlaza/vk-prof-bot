@@ -1,29 +1,26 @@
 FROM python:3.11-slim
 
-# 1. Ставим git и ca-certificates
+# Ставим git и ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Обновляем системный CA-bundle
+# Обновляем системный CA-bundle
 RUN update-ca-certificates
 
-# 3. Если у тебя есть кастомный full_certs.pem — склеиваем его с системным
-# (если файла нет — эта строка не сломает сборку)
-RUN cat /app/full_certs.pem /etc/ssl/certs/ca-certificates.crt > /tmp/combined_certs.pem 2>/dev/null || true
-RUN cp /tmp/combined_certs.pem /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+RUN cat /app/full_certs.pem >> /etc/ssl/certs/ca-certificates.crt
 
-# 4. Явно указываем Python использовать правильный CA-bundle
+# Переменные, которые заставляют requests использовать системные сертификаты
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-# 5. Установка зависимостей
+# Копируем requirements и ставим зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 6. Копирование кода
+# Копируем весь код
 COPY . .
 
 CMD ["python", "max_bot.py"]
