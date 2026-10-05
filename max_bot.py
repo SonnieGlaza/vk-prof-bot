@@ -209,6 +209,7 @@ class MaxApiCompat:
                 self.vk_api = self._vk_session.get_api()
             except Exception:
                 log.exception("Не удалось инициализировать VK API для имён в сводной выгрузке")
+
     def _request(self, method, endpoint, **kwargs):
     # Используем urljoin — это штатный и самый безопасный способ склеить base + path
         url = urljoin(self.base_url.rstrip('/'), endpoint.lstrip('/'))
