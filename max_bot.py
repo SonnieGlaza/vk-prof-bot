@@ -19,7 +19,7 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urljoin
 
 import requests
 
@@ -33,7 +33,6 @@ MAX_BOT_TOKEN = (os.getenv("MAX_BOT_TOKEN") or "").strip()
 MAX_CA_BUNDLE = (os.getenv("MAX_CA_BUNDLE") or "").strip() or True
 MAX_WEBHOOK_URL = (os.getenv("MAX_WEBHOOK_URL") or "").strip()
 MAX_WEBHOOK_SECRET = (os.getenv("MAX_WEBHOOK_SECRET") or "").strip()
-MAX_WEBHOOK_PATH = urlparse(MAX_WEBHOOK_URL).path or "/max/webhook"
 MAX_QUEUE_WAKE = threading.Event()
 MAX_SEND_TARGET: core.contextvars.ContextVar[dict | None] = core.contextvars.ContextVar(
     "max_send_target", default=None
