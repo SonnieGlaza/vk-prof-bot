@@ -13,6 +13,8 @@ import json
 import logging
 import mimetypes
 import os
+import certifi
+import requests
 import re
 import threading
 import time
@@ -209,22 +211,19 @@ class MaxApiCompat:
             except Exception:
                 log.exception("Не удалось инициализировать VK API для имён в сводной выгрузке")
 
-    def _request(self, method, path, *, params=None, json=None, files=None, headers=None, timeout=(10, 30), raise_errors=True):
-        request_headers = {"Authorization": self.token, "Accept": "application/json"}
-        if headers:
-            request_headers.update(headers)
+    def _request(self, method, endpoint, **kwargs):
+        url = f"{self.base_url}{endpoint}"
+    
+    # Явно указываем путь к сертификатам из пакета certifi
+    # Это работает даже если ENV-переменные не подхватились
+        cert_path = certifi.where()
+    
         response = requests.request(
-            method,
-            f"{self.base_url}/{path.lstrip('/')}",
-            params=params,
-            json=json,
-            files=files,
-            headers=request_headers,
-            timeout=timeout,
-            verify=MAX_CA_BUNDLE,
+            method=method,
+            url=url,
+            verify=cert_path,  # <-- ключевое изменение
+            **kwargs
         )
-        if raise_errors:
-            response.raise_for_status()
         return response
 
     def _upload(self, source, filename: str, media_type: str) -> dict:
