@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
-# Ставим git и ca-certificates
+# Ставим git (чтобы можно было ставить git-зависимости, если позже понадобятся)
+# и ca-certificates (системные сертификаты)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
@@ -8,19 +9,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Обновляем системный CA-bundle
 RUN update-ca-certificates
-
 RUN cat /app/full_certs.pem >> /etc/ssl/certs/ca-certificates.crt
 
-# Переменные, которые заставляют requests использовать системные сертификаты
-ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
-# Копируем requirements и ставим зависимости
+# Устанавливаем зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь код
+# Копируем код
 COPY . .
+
+# Явно говорим requests использовать certifi (это самый стабильный вариант)
+# Если certifi установлен, он содержит свежие сертификаты и работает везде.
+ENV REQUESTS_CA_BUNDLE=/usr/local/lib/python3.11/site-packages/certifi/cacert.pem
+ENV SSL_CERT_FILE=/usr/local/lib/python3.11/site-packages/certifi/cacert.pem
 
 CMD ["python", "max_bot.py"]
