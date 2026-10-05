@@ -4,3 +4,9 @@ requests>=2.31.0,<3
 openpyxl>=3.1.0,<4
 Pillow>=10.0.0,<12
 psycopg2-binary>=2.9.9,<3
+SQLAlchemy
+python-dotenv
+maxapi 
+aiohttp
+git+https://github.com/max-messenger/max-botapi-python.git
+certifi
