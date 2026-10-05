@@ -16,6 +16,7 @@ import os
 import certifi
 import requests
 import re
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,7 +31,43 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(
 
 MAX_API_BASE = (os.getenv("MAX_API_BASE") or "https://platform-api2.max.ru").rstrip("/")
 MAX_BOT_TOKEN = (os.getenv("MAX_BOT_TOKEN") or "").strip()
-MAX_CA_BUNDLE = (os.getenv("MAX_CA_BUNDLE") or "").strip() or True
+# MAX API отдаёт цепочку «Russian Trusted Root/Sub CA» (Минцифры), которой нет
+# в стандартном бандле certifi — без этого файла TLS-проверка падает с
+# CERTIFICATE_VERIFY_FAILED. Кладётся в репозиторий: app/full_certs.pem.
+MAX_RUSSIAN_CA_BUNDLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "full_certs.pem")
+
+
+def _build_ca_bundle() -> str | bool:
+    """Общий CA-бандл для запросов к MAX API.
+
+    Сшиваем стандартные корни (certifi) и сертификаты российского ЦС из
+    app/full_certs.pem: так и platform-api2.max.ru, и хосты загрузки медиа
+    (oneme.ru/okcdn.ru) проходят проверку. Если MAX_CA_BUNDLE задан в
+    окружении — используем его как есть.
+    """
+    explicit = (os.getenv("MAX_CA_BUNDLE") or "").strip()
+    if explicit:
+        return explicit
+    if not os.path.isfile(MAX_RUSSIAN_CA_BUNDLE):
+        return True
+    try:
+        import certifi
+
+        ca_text = open(certifi.where(), "r", encoding="utf-8").read()
+        russian_text = open(MAX_RUSSIAN_CA_BUNDLE, "r", encoding="utf-8").read()
+        merged = os.path.join(tempfile.gettempdir(), "max_bot_ca_bundle.pem")
+        with open(merged, "w", encoding="utf-8") as out:
+            out.write(ca_text.rstrip() + "\n")
+            if not russian_text.lstrip().startswith("-----"):
+                out.write("\n")
+            out.write(russian_text)
+        return merged
+    except Exception:
+        log.exception("Не удалось собрать объединённый CA-бандл; использую только российские корни")
+        return MAX_RUSSIAN_CA_BUNDLE
+
+
+MAX_CA_BUNDLE = _build_ca_bundle()
 MAX_WEBHOOK_URL = (os.getenv("MAX_WEBHOOK_URL") or "").strip()
 MAX_WEBHOOK_SECRET = (os.getenv("MAX_WEBHOOK_SECRET") or "").strip()
 MAX_QUEUE_WAKE = threading.Event()
