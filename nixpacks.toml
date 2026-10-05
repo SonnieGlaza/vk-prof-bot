@@ -1,0 +1,5 @@
+# Версия Python для Nixpacks на Railway
+# https://nixpacks.com/docs/configuration/file
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
