@@ -87,14 +87,18 @@ class _Connection:
         else:
             self._conn.close()
 
-
-def db_connect() -> _Connection:
-    if USE_PG:
-        import psycopg2
-
-        return _Connection(psycopg2.connect(_pg_url()), pg=True)
-    return _Connection(sqlite3.connect(DB_PATH, check_same_thread=False), pg=False)
-
+def db_connect():
+    url = urlparse(os.getenv("DATABASE_URL"))
+    conn = psycopg2.connect(
+        host=url.hostname,
+        port=url.port,
+        user=url.username,
+        password=url.password,
+        dbname=url.path[1:],
+        sslmode="require",
+        connect_timeout=10,
+    )
+    return _Connection(conn, pg=True)
 
 def table_column_names(conn: _Connection, table: str) -> set[str]:
     cur = conn.cursor()
