@@ -1281,9 +1281,18 @@ def _top3_from_scores(scores: dict) -> list:
 
 
 def _vk_user_link(user_id: int) -> str:
-    if int(user_id) < 0:
-        return f"MAX user id {abs(int(user_id))}"
-    return f"https://vk.com/id{user_id}"
+    """Внешняя ссылка на профиль: VK или MAX (шаблоны можно переопределить env)."""
+    uid = int(user_id)
+    if uid < 0:
+        template = (os.getenv("MAX_PROFILE_URL_TEMPLATE") or "https://max.ru/user/{id}").strip()
+        return template.format(id=abs(uid))
+    template = (os.getenv("VK_PROFILE_URL_TEMPLATE") or "https://vk.com/id{id}").strip()
+    return template.format(id=uid)
+
+
+def _user_short_link(user_id: int) -> str:
+    """Короткий текст ссылки без схемы (для ячейки Excel)."""
+    return _vk_user_link(user_id).split("://", 1)[-1]
 
 
 def _loads_json_blob(raw, default=None):
@@ -1518,6 +1527,84 @@ def _test_title_for_export(test_id: str) -> str:
     }.get(test_id, test_id)
 
 
+# ---------------------------------------------------------------------------
+# Форматирование Excel-выгрузки: единый читабельный вид (шапка, перенос,
+# объединение, ширина, заморозка), чтобы листать было удобно.
+# ---------------------------------------------------------------------------
+_HEADER_FILL = openpyxl.styles.PatternFill("solid", fgColor="305496")
+_HEADER_FONT = openpyxl.styles.Font(bold=True, color="FFFFFF")
+_THIN_SIDE = openpyxl.styles.Side(style="thin", color="B0B0B0")
+_CELL_BORDER = openpyxl.styles.Border(left=_THIN_SIDE, right=_THIN_SIDE, top=_THIN_SIDE, bottom=_THIN_SIDE)
+_LINK_FONT = openpyxl.styles.Font(color="0563C1", underline="single")
+
+
+def _estimate_lines(text: str, width_chars: int) -> int:
+    """Сколько строк займёт текст при переносе по ширине столбца."""
+    total = 0
+    for part in str(text or "").splitlines():
+        total += max(1, (len(part) + max(1, width_chars) - 1) // max(1, width_chars))
+    return max(1, total)
+
+
+def _style_sheet_grid(ws, *, widths: dict[int, int], wrap_cols: list[int], freeze: str = "A2") -> None:
+    """Шапка (фон+жирный+центр), границы, ширина колонок, перенос, заморозка."""
+    from openpyxl.cell.cell import MergedCell
+    from openpyxl.utils import get_column_letter
+
+    for col_idx, w in widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+    max_col = max(widths)
+    for row_cells in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=max_col):
+        for cell in row_cells:
+            if isinstance(cell, MergedCell):
+                continue
+            cell.border = _CELL_BORDER
+            if cell.row == 1:
+                cell.fill = _HEADER_FILL
+                cell.font = _HEADER_FONT
+                cell.alignment = openpyxl.styles.Alignment(horizontal="center", vertical="center", wrap_text=True)
+            elif cell.column in wrap_cols:
+                cell.alignment = openpyxl.styles.Alignment(vertical="top", wrap_text=True)
+            else:
+                cell.alignment = openpyxl.styles.Alignment(vertical="top")
+    ws.freeze_panes = freeze
+    try:
+        ws.auto_filter.ref = ws.dimensions
+    except Exception:
+        pass
+
+
+def _apply_user_link(cell, user_id: int) -> None:
+    """Ячейка-гиперссылка на профиль платформы."""
+    cell.value = _user_short_link(user_id)
+    cell.hyperlink = _vk_user_link(user_id)
+    cell.font = _LINK_FONT
+
+
+def _merge_user_columns(ws, *, uids: list[int], max_col: int) -> None:
+    """Вертикально объединить колонки 1..max_col для подряд идущих строк одного пользователя."""
+    if not uids:
+        return
+    group_start = 2
+    for idx in range(len(uids) + 1):
+        cur = uids[idx] if idx < len(uids) else None
+        prev = uids[idx - 1] if idx > 0 else None
+        if idx > 0 and cur != prev:
+            end_row = min(group_start + idx - 1, ws.max_row)
+            if end_row > group_start:
+                for col in range(1, max_col + 1):
+                    ws.merge_cells(start_row=group_start, start_column=col, end_row=end_row, end_column=col)
+            group_start = group_start + idx
+
+
+def _format_answer_result(raw) -> str:
+    """Понятный текст «что дал ответ» (веса по факторам)."""
+    data = _loads_json_blob(raw, {})
+    if not isinstance(data, dict) or not data:
+        return ""
+    return "\n".join(f"{k}: {v:g}" for k, v in data.items())
+
+
 def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = None) -> bytes:
     headers = [
         "№ (новый пользователь — новый номер)",
@@ -1647,7 +1734,6 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
             user_serial[uid] = next_serial
             next_serial += 1
         no = user_serial[uid]
-        link = _vk_user_link(uid)
         display_name = name_by_uid.get(uid, "")
         test_name = _test_title_for_export(tid)
         if kind == "result":
@@ -1690,46 +1776,69 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
                     if extra:
                         parts.append(f"Накоплено по ответам: {extra}")
             summary = "\n".join(parts)
-        ws.append([no, link, display_name, test_name, finished_txt, dt, summary])
+        r = ws.max_row + 1
+        ws.cell(row=r, column=1, value=no)
+        _apply_user_link(ws.cell(row=r, column=2), uid)
+        ws.cell(row=r, column=3, value=display_name)
+        ws.cell(row=r, column=4, value=test_name)
+        ws.cell(row=r, column=5, value=finished_txt)
+        ws.cell(row=r, column=6, value=dt)
+        ws.cell(row=r, column=7, value=summary)
+        ws.row_dimensions[r].height = max(15, 15 * _estimate_lines(summary, 100))
+
+    _style_sheet_grid(
+        ws,
+        widths={1: 7, 2: 24, 3: 26, 4: 34, 5: 11, 6: 20, 7: 100},
+        wrap_cols=[3, 4, 7],
+    )
 
     ws_ans = wb.create_sheet("ответы")
     ans_headers = [
-        "id записи",
+        "№ (новый пользователь — новый номер)",
         "Ссылка на пользователя",
-        "Имя и фамилия (ВК)",
+        "Имя и фамилия",
         "Название теста",
-        "session_id",
-        "step_index",
-        "answer_key",
-        "answer_label",
-        "question_text",
-        "weights_json",
-        "created_at_utc",
+        "Вопрос",
+        "Ответ",
+        "Результат",
     ]
     ws_ans.append(ans_headers)
+    ans_sheet_uids: list[int] = []
     for ar in answer_rows:
         _aid, _sid, _uid, _tid_raw, _step, _akey, _qtxt, _alab, _wjson, _cat = ar
         _uid = int(_uid)
         _tid = normalize_test_id((_tid_raw or TEST_KLIMOV_SELF) if isinstance(_tid_raw, str) else TEST_KLIMOV_SELF)
-        try:
-            _dt = datetime.utcfromtimestamp(int(_cat)).strftime("%Y-%m-%d %H:%M:%S")
-        except (TypeError, ValueError, OSError):
-            _dt = ""
-        ws_ans.append(
-            [
-                int(_aid),
-                _vk_user_link(_uid),
-                name_by_uid.get(_uid, ""),
-                _test_title_for_export(_tid),
-                int(_sid),
-                int(_step),
-                str(_akey),
-                str(_alab),
-                str(_qtxt),
-                str(_wjson),
-                _dt,
-            ]
+        if _uid not in user_serial:
+            user_serial[_uid] = next_serial
+            next_serial += 1
+        ans_sheet_uids.append(_uid)
+        question = str(_qtxt or "")
+        answer = str(_alab or "")
+        if not answer:
+            answer = str(_akey or "")
+        result = _format_answer_result(_wjson)
+        r = ws_ans.max_row + 1
+        first_of_user = len(ans_sheet_uids) == 1 or ans_sheet_uids[-2] != _uid
+        if first_of_user:
+            ws_ans.cell(row=r, column=1, value=user_serial[_uid])
+            _apply_user_link(ws_ans.cell(row=r, column=2), _uid)
+            name_cell = ws_ans.cell(row=r, column=3, value=name_by_uid.get(_uid, ""))
+            name_cell.alignment = openpyxl.styles.Alignment(vertical="top", wrap_text=True)
+            ws_ans.cell(row=r, column=4, value=_test_title_for_export(_tid))
+        ws_ans.cell(row=r, column=5, value=question)
+        ws_ans.cell(row=r, column=6, value=answer)
+        ws_ans.cell(row=r, column=7, value=result)
+        ws_ans.row_dimensions[r].height = max(
+            15,
+            15 * max(_estimate_lines(question, 70), _estimate_lines(result, 45), 1),
         )
+
+    _merge_user_columns(ws_ans, uids=ans_sheet_uids, max_col=4)
+    _style_sheet_grid(
+        ws_ans,
+        widths={1: 7, 2: 24, 3: 26, 4: 34, 5: 70, 6: 24, 7: 45},
+        wrap_cols=[3, 4, 5, 6, 7],
+    )
 
     bio = io.BytesIO()
     wb.save(bio)
