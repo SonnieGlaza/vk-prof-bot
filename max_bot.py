@@ -306,6 +306,7 @@ class _MaxMessages:
             except ValueError:
                 payload = {}
             if response.ok:
+                log.info("[MAX] messages.send ok: %s", str(payload)[:200])
                 return payload
             if payload.get("code") == "attachment.not.ready" and attempt < 3:
                 time.sleep(2 ** attempt)
@@ -519,13 +520,16 @@ def _dedup_max_message(chat_id: int, message_id: int) -> bool:
 def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
     update_type = update.get("update_type")
     if update_type not in ("bot_started", "message_created"):
+        log.info("[MAX] skip: unsupported update_type=%r", update_type)
         return
     message = update.get("message") or {}
     sender = message.get("sender") or update.get("user") or {}
     if sender.get("is_bot"):
+        log.info("[MAX] skip: sender is bot")
         return
     raw_user_id = int(sender.get("user_id") or sender.get("id") or 0)
     if raw_user_id <= 0:
+        log.info("[MAX] skip: no sender user_id (%r)", update)
         return
     internal_user_id = _remember_max_user(sender)
     recipient = message.get("recipient") or {}
@@ -546,21 +550,28 @@ def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
         message_id = update.get("timestamp") or int(time.time() * 1000)
     message_hash = int.from_bytes(hashlib.sha256(str(message_id).encode()).digest()[:8], "big") & ((1 << 63) - 1)
     if not _dedup_max_message(dedup_peer_id, message_hash):
+        log.info("[MAX] skip: duplicate message id=%s", message_id)
         return
+    log.info("[MAX] dispatch: type=%s user=%s chat=%s text=%r", update_type, raw_user_id, target_chat, text)
 
     peer_token = core._REPLY_PEER_ID.set(reply_peer_id)
     target_token = MAX_SEND_TARGET.set(target)
     try:
         if update_type == "bot_started":
             core.send_welcome(api, internal_user_id)
+            log.info("[MAX] bot_started -> welcome sent")
             return
         if core.dispatch_command(api, internal_user_id, text):
+            log.info("[MAX] command handled")
             return
         if core.handle_reminder_continue_choice(api, internal_user_id, text):
+            log.info("[MAX] reminder choice handled")
             return
         if text.strip().isdigit():
             core.handle_answer(api, internal_user_id, text.strip())
+            log.info("[MAX] answer handled")
         else:
+            log.info("[MAX] fallback: %r", text)
             core.send_message(
                 api,
                 internal_user_id,
@@ -645,10 +656,12 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if urlparse(self.path).path != MAX_WEBHOOK_PATH:
+            log.warning("[MAX] webhook 404: path %r != %r", urlparse(self.path).path, MAX_WEBHOOK_PATH)
             _write_json(self, 404, {"error": "not found"})
             return
         received_secret = self.headers.get("X-Max-Bot-Api-Secret", "")
         if not hmac.compare_digest(received_secret, MAX_WEBHOOK_SECRET):
+            log.warning("[MAX] webhook 401: secret mismatch (len received=%d)", len(received_secret))
             _write_json(self, 401, {"error": "unauthorized"})
             return
         try:
@@ -656,10 +669,17 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
             if length <= 0 or length > 2_000_000:
                 _write_json(self, 413, {"error": "invalid request size"})
                 return
-            update = json.loads(self.rfile.read(length).decode("utf-8"))
+            raw_body = self.rfile.read(length)
+            update = json.loads(raw_body.decode("utf-8"))
             if not isinstance(update, dict):
                 raise ValueError("update must be an object")
             update_type = update.get("update_type")
+            log.info(
+                "[MAX] webhook POST: type=%s size=%d snippet=%s",
+                update_type,
+                length,
+                raw_body[:300].decode("utf-8", "replace"),
+            )
             if update_type in ("message_created", "bot_started"):
                 _enqueue_update(update)
             _write_json(self, 200, {"ok": True})
