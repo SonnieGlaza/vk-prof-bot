@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import os
 import psycopg2
 from urllib.parse import urlparse
 from typing import Any
@@ -91,17 +90,27 @@ class _Connection:
             self._conn.close()
 
 def db_connect():
+    if not USE_PG:
+        # Fallback на SQLite, если DATABASE_URL не задан
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return _Connection(conn, pg=False)
+
     url = urlparse(os.getenv("DATABASE_URL"))
+    if not url.hostname or not url.port or not url.username or not url.password:
+        raise RuntimeError("DATABASE_URL is missing required components (host/port/user/password)")
+
     conn = psycopg2.connect(
         host=url.hostname,
         port=url.port,
         user=url.username,
         password=url.password,
-        dbname=url.path[1:],
+        dbname=url.path.lstrip('/'),  # безопаснее, чем [1:]
         sslmode="require",
         connect_timeout=10,
     )
     return _Connection(conn, pg=True)
+
 
 def table_column_names(conn: _Connection, table: str) -> set[str]:
     cur = conn.cursor()
