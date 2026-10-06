@@ -547,14 +547,14 @@ CONSENT_TEXT = (
     "обезличивание, блокирование, удаление и уничтожение данных — с использованием средств автоматизации и без них.\n\n"
     "Согласие действует 1 год со дня подтверждения. По окончании срока данные, ответы и результаты будут удалены. "
     "Отозвать согласие можно в любое время командой «Отозвать согласие».\n\n"
-    "Чтобы продолжить, подтвердите согласие. После этого я попрошу указать населённый пункт и ФИО.\n\n"
+    "Чтобы продолжить, подтвердите согласие. После этого я попрошу указать населённый пункт.\n\n"
     "1 — Да, согласен(на)\n2 — Нет, не согласен(на)\n"
     "Нажмите кнопку или напишите 1 или 2.\n"
 )
 
 WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания.\n"
-    "Бот не просит имя для начала. ФИО и населённый пункт запрашиваются после согласия.\n\n"
+    "Сначала бот попросит ваши ФИО, затем — согласие на обработку данных и населённый пункт.\n\n"
     "Доступные тесты:\n"
     "• ДДО (30 вопросов): отметьте, согласны вы с утверждениями или нет. Узнайте, что вам ближе: природа, техника, знаки, искусство или работа с людьми.\n"
     "• ОПГ (45 вопросов): оцените умение, отношение и желание по шкале 0–2.\n"
@@ -844,13 +844,14 @@ def accept_user_consent(user_id: int) -> None:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO user_profiles(
-                   user_id, full_name, locality, consent_status, consent_at, consent_expires_at,
-                   onboarding_step, consent_version
-               ) VALUES (?, NULL, NULL, 'accepted', ?, ?, 'locality', ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                   full_name=NULL, locality=NULL, consent_status='accepted', consent_at=excluded.consent_at,
-                   consent_expires_at=excluded.consent_expires_at, onboarding_step='locality',
-                   consent_version=excluded.consent_version""",
+                  user_id, full_name, locality, consent_status, consent_at, consent_expires_at,
+                  onboarding_step, consent_version
+              ) VALUES (?, NULL, NULL, 'accepted', ?, ?, 'locality', ?)
+              ON CONFLICT(user_id) DO UPDATE SET
+                  consent_status='accepted', consent_at=excluded.consent_at,
+                  consent_expires_at=excluded.consent_expires_at, consent_version=excluded.consent_version,
+                  onboarding_step=CASE WHEN user_profiles.full_name IS NOT NULL
+                      AND user_profiles.full_name <> '' THEN 'locality' ELSE 'consent' END""",
             (user_id, accepted_at, expires_at, CONSENT_VERSION),
         )
         conn.commit()
@@ -860,7 +861,7 @@ def save_user_locality(user_id: int, locality: str) -> None:
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE user_profiles SET locality=?, onboarding_step='full_name' "
+            "UPDATE user_profiles SET locality=?, onboarding_step='complete' "
             "WHERE user_id=? AND consent_status='accepted' AND consent_expires_at>?",
             (locality, user_id, now_ts()),
         )
@@ -870,10 +871,19 @@ def save_user_locality(user_id: int, locality: str) -> None:
 def save_user_full_name(user_id: int, full_name: str) -> None:
     with db_connect() as conn:
         cur = conn.cursor()
+        # ФИО — первый шаг: строка профиля создаётся, если её ещё нет,
+        # иначе заполняется только имя (согласие/населённый пункт не сбрасываются).
         cur.execute(
-            "UPDATE user_profiles SET full_name=?, onboarding_step='complete' "
-            "WHERE user_id=? AND consent_status='accepted' AND consent_expires_at>?",
-            (full_name, user_id, now_ts()),
+            "INSERT INTO user_profiles("
+            "user_id, full_name, locality, consent_status, consent_at, consent_expires_at, onboarding_step, consent_version"
+            ") VALUES (?, ?, NULL, '', 0, 0, 'consent', ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "full_name=excluded.full_name, "
+            "onboarding_step=CASE "
+            "WHEN user_profiles.consent_status='accepted' THEN "
+            "(CASE WHEN user_profiles.locality IS NOT NULL AND user_profiles.locality <> '' "
+            "THEN 'complete' ELSE 'locality' END) ELSE 'consent' END",
+            (user_id, full_name, CONSENT_VERSION),
         )
         conn.commit()
 
@@ -906,7 +916,7 @@ def purge_expired_personal_data() -> int:
 
 def user_profile_is_complete(user_id: int) -> bool:
     profile = get_user_profile(user_id)
-    if profile and (
+    if profile and profile.get("consent_status") == "accepted" and (
         int(profile.get("consent_expires_at") or 0) <= now_ts()
         or profile.get("consent_version") != CONSENT_VERSION
     ):
@@ -2661,18 +2671,18 @@ def _send_consent_prompt(vk, user_id: int) -> None:
 
 def send_welcome(vk, user_id: int):
     profile = get_user_profile(user_id)
-    if profile and (
+    if profile and profile.get("consent_status") == "accepted" and (
         int(profile.get("consent_expires_at") or 0) <= now_ts()
         or profile.get("consent_version") != CONSENT_VERSION
     ):
         delete_user_personal_data(user_id)
         profile = None
-    if not profile or profile.get("consent_status") != "accepted":
+    if not profile or not profile.get("full_name"):
+        send_message(vk, user_id, "Напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
+    elif profile.get("consent_status") != "accepted":
         _send_consent_prompt(vk, user_id)
     elif not profile.get("locality"):
         send_message(vk, user_id, "Укажите ваш населённый пункт: город, село, деревню или посёлок.")
-    elif not profile.get("full_name"):
-        send_message(vk, user_id, "Напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
     else:
         send_message(vk, user_id, WELCOME_TEXT, keyboard=build_menu_keyboard())
 
@@ -2686,11 +2696,11 @@ def _valid_full_name(value: str) -> bool:
 
 
 def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
-    """Collect explicit consent first, then the locality and full name; tests stay locked until complete."""
+    """Онбординг: ФИО → согласие на обработку данных → населённый пункт → тесты."""
     stripped = " ".join(_strip_command_text(text).split())
     command = _normalize_cmd(stripped)
     profile = get_user_profile(user_id)
-    if profile and (
+    if profile and profile.get("consent_status") == "accepted" and (
         int(profile.get("consent_expires_at") or 0) <= now_ts()
         or profile.get("consent_version") != CONSENT_VERSION
     ):
@@ -2711,7 +2721,26 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
         send_welcome(vk, user_id)
         return True
 
-    if not profile or profile.get("consent_status") != "accepted":
+    # Шаг 1: ФИО (запрашивается раньше согласия и населённого пункта).
+    if not profile or not profile.get("full_name"):
+        full_name = stripped[:160]
+        if (
+            len(full_name) < 5
+            or command in ("1", "2", "да", "нет", "меню", "/start", "отозвать согласие")
+            or not _valid_full_name(full_name)
+        ):
+            send_message(vk, user_id, "Укажите ФИО: фамилию и имя, а если есть — отчество. Используйте буквы и дефис.")
+            return True
+        save_user_full_name(user_id, full_name)
+        send_message(vk, user_id, "ФИО сохранены.")
+        if profile and profile.get("consent_status") == "accepted":
+            send_welcome(vk, user_id)
+        else:
+            _send_consent_prompt(vk, user_id)
+        return True
+
+    # Шаг 2: согласие на обработку персональных данных.
+    if profile.get("consent_status") != "accepted":
         if int(user_id) not in _CONSENT_PROMPTED_USERS:
             _send_consent_prompt(vk, user_id)
             return True
@@ -2733,6 +2762,7 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
         _send_consent_prompt(vk, user_id)
         return True
 
+    # Шаг 3: населённый пункт.
     if profile.get("onboarding_step") == "locality" or not profile.get("locality"):
         locality = stripped[:120]
         if (
@@ -2743,15 +2773,6 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
             send_message(vk, user_id, "Напишите населённый пункт словами, например: Ижевск или село Завьялово.")
             return True
         save_user_locality(user_id, locality)
-        send_message(vk, user_id, "Теперь напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
-        return True
-
-    if profile.get("onboarding_step") == "full_name" or not profile.get("full_name"):
-        full_name = stripped[:160]
-        if not _valid_full_name(full_name):
-            send_message(vk, user_id, "Укажите ФИО: фамилию и имя, а если есть — отчество. Используйте буквы и дефис.")
-            return True
-        save_user_full_name(user_id, full_name)
         send_welcome(vk, user_id)
         return True
 
