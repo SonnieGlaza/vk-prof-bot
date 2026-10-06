@@ -2790,18 +2790,12 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
         if command in ("1", "да", "согласен", "согласна") or command.startswith("1 "):
             _CONSENT_PROMPTED_USERS.discard(int(user_id))
             accept_user_consent(user_id)
-            send_message(vk, user_id, "Согласие принято. Укажите ваш населённый пункт: город, село, деревню или посёлок.")
+            send_message(vk, user_id, "Укажите ваш населённый пункт: город, село, деревню или посёлок.")
             return True
         if command in ("2", "нет", "не согласен", "не согласна") or command.startswith("2 "):
             _CONSENT_PROMPTED_USERS.discard(int(user_id))
             refuse_user_consent(user_id)
-            send_message(
-                vk,
-                user_id,
-                "Принято: обработка персональных данных не разрешена. "
-                "Тесты останутся доступными, в выгрузках напротив вас будет отметка «Нет (отказ от обработки)». "
-                "Укажите ваш населённый пункт: город, село, деревню или посёлок.",
-            )
+            send_message(vk, user_id, "Укажите ваш населённый пункт: город, село, деревню или посёлок.")
             return True
         _send_consent_prompt(vk, user_id)
         return True
