@@ -83,8 +83,8 @@ EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
 
 REMINDER_CHECK_EVERY_SEC = 60
-REMINDER_AFTER_INACTIVE_MIN = 20
-REMINDER_REPEAT_MIN = 60
+REMINDER_AFTER_INACTIVE_MIN = 60
+REMINDER_REPEAT_MIN = 24 * 60
 
 # Long Poll: VK держит соединение до `wait` секунд; в vk_api таймаут запроса = wait + 10.
 LONGPOLL_WAIT_SEC = int(os.environ.get("VK_LONGPOLL_WAIT", "50"))
@@ -536,30 +536,35 @@ CAREER_HINTS_JOVASHI = {
     "ТЕХНИКА": "⚙️ Техника — оборудование, производство: электрик, программист, технолог, монтажник.",
 }
 
+CONSENT_VERSION = "udmurtia-career-v1"
+CONSENT_TEXT = (
+    "Согласие на обработку персональных данных\n\n"
+    "Я, пользователь этого аккаунта мессенджера, на основании статьи 9 Федерального закона от 27 июля 2006 г. № 152-ФЗ «О персональных данных» "
+    "в целях моей профессиональной ориентации даю согласие казённому учреждению Удмуртской Республики "
+    "«Республиканский центр занятости населения» на обработку моих персональных данных: ФИО, населённого пункта "
+    "(город, село, деревня), идентификатора аккаунта в мессенджере, ответов и результатов профориентационных опросников.\n\n"
+    "Обработка может включать сбор, запись, систематизацию, накопление, хранение, уточнение, использование, "
+    "обезличивание, блокирование, удаление и уничтожение данных — с использованием средств автоматизации и без них.\n\n"
+    "Согласие действует 1 год со дня подтверждения. По окончании срока данные, ответы и результаты будут удалены. "
+    "Отозвать согласие можно в любое время командой «Отозвать согласие».\n\n"
+    "Чтобы продолжить, подтвердите согласие. После этого я попрошу указать населённый пункт и ФИО.\n\n"
+    "1 — Да, согласен(на)\n2 — Нет, не согласен(на)\n"
+    "Нажмите кнопку или напишите 1 или 2.\n"
+)
+
 WELCOME_TEXT = (
-    "Привет! Я помогу пройти короткие опросники для профориентации и самопознания. "
-    "Ответы анонимны на стороне бота; будьте честны — так результат полезнее.\n\n"
+    "Привет! Я помогу пройти короткие опросники для профориентации и самопознания.\n"
+    "Бот не просит имя для начала. ФИО и населённый пункт запрашиваются после согласия.\n\n"
     "Доступные тесты:\n"
-    "• ДДО — 30 утверждений «согласен / не согласен»; баллы по столбцам бланка П, Т, З, Х, Ч "
-    "(природа, техника, знаковая система, художественный образ, человек–человек). Вес пункта 1 или 2 балла по ключу методички.\n"
-    "• ОПГ (опросник профессиональной готовности) — 45 вопросов; на каждое высказывание три оценки 0–2 по очереди в одном сообщении "
-    "(умение: хорошо / средне / плохо; отношение: положительные / нейтральные / отрицательные; желание: да / всё равно / нет). "
-    "Столбцы бланка соответствуют сферам Климова (Ч-З … Ч-Ч). Если не делали того, что в высказывании — в бланке прочерки на умение и отношение; "
-    "в боте на умение выберите «0 — делаю плохо», тогда отношение и желание в сумму не войдут.\n"
-    "• ОПТ (Таблица для ориентировочного определения предпочтительности типа будущей профессии) — 24 вопроса, "
-    "3 варианта; сферы интересов: люди, техника, искусство и др.\n"
-    "• Йовайши (проф. склонности, модиф. Резапкиной) — 24 вопроса, 3 варианта; выявление преобладающих склонностей "
-    "к определённым типам профессиональной деятельности.\n"
-    "• Кеттелл 16PF — 187 вопросов для взрослых; ориентировочные суммы по первичным факторам в боте.\n"
-    "• Кеттелл 16PF/C — 105 вопросов для молодёжи; в боте 15 блоков по 7 пунктов (фактор Q4 не входит в форму).\n"
-    "• КОТ — краткий ориентировочный тест (логика, словарь, внимание, ориентировочные задачи; часть пунктов с чертежами в оригинале "
-    "заменена текстовыми подсказками в боте).\n"
-    "• ЭН - 60 — 60 вопросов «да/нет» для детей и подростков; шкалы E, N и «ложь» (социальная желательность).\n"
-    "• ЭН - 57 — 57 утверждений «да/нет»; личностный опросник Айзенка (EPI): шкалы E, N и L "
-    "(достоверность ответов); формат ориентирован на взрослых.\n"
-    "• Голланд (RIASEC) — 42 пары профессий (вариант А / В); шесть типов предпочтений по ключу из методички.\n\n"
-    "Можно начать тест кнопкой внизу или командой в чат: ддо, опг, таблица (или опт), йовайши (или йоваши), голланд, кеттелл (16pf), "
-    "16pf/c (молодёжь), кот, эн-60, эн-57. Слово «меню» или «привет» снова покажет это сообщение.\n\n"
+    "• ДДО (30 вопросов): отметьте, согласны вы с утверждениями или нет. Узнайте, что вам ближе: природа, техника, знаки, искусство или работа с людьми.\n"
+    "• ОПГ (45 вопросов): оцените умение, отношение и желание по шкале 0–2.\n"
+    "• Йовайши (24 вопроса): узнайте свои профессиональные склонности.\n"
+    "• Кеттелл 16PF (187 вопросов): опросник о личностных особенностях для взрослых.\n"
+    "• Кеттелл 16PF/C (105 вопросов): версия для молодёжи.\n"
+    "• КОТ: задания на логику, внимание и словарный запас.\n"
+    "• ЭН-60 (60 вопросов): опросник для детей и подростков; оцениваются шкалы E, N и социальная желательность.\n"
+    "• ЭН-57 (57 вопросов): личностный опросник для взрослых.\n\n"
+    "Нажмите кнопку с названием теста или напишите его название в чат. Выбирайте ответы кнопками. Напишите «меню», чтобы вернуться к списку."
 )
 
 
@@ -708,6 +713,20 @@ def init_db():
         ensure_column(conn, "test_results", "test_id", "TEXT NOT NULL DEFAULT 'klimov_self'")
         ensure_column(conn, "test_results", "best_type", "TEXT NOT NULL DEFAULT ''")
         cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id BIGINT PRIMARY KEY,
+                full_name TEXT,
+                locality TEXT,
+                consent_status TEXT NOT NULL,
+                consent_at BIGINT,
+                consent_expires_at BIGINT,
+                onboarding_step TEXT NOT NULL,
+                consent_version TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
             "UPDATE user_progress SET test_id=? WHERE test_id=?",
             (TEST_HOLLAND_RIASEC, LEGACY_HOLLAND),
         )
@@ -785,6 +804,121 @@ def init_db():
 
 def now_ts():
     return int(time.time())
+
+
+def _one_year_after(timestamp: int) -> int:
+    date = datetime.fromtimestamp(timestamp, timezone.utc)
+    try:
+        expiry = date.replace(year=date.year + 1)
+    except ValueError:
+        expiry = date.replace(year=date.year + 1, day=28)
+    return int(expiry.timestamp())
+
+
+def get_user_profile(user_id: int) -> dict | None:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT full_name, locality, consent_status, consent_at, consent_expires_at, onboarding_step, consent_version "
+            "FROM user_profiles WHERE user_id=?",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "full_name": row[0],
+        "locality": row[1],
+        "consent_status": row[2],
+        "consent_at": row[3],
+        "consent_expires_at": row[4],
+        "onboarding_step": row[5],
+        "consent_version": row[6],
+    }
+
+
+def accept_user_consent(user_id: int) -> None:
+    accepted_at = now_ts()
+    expires_at = _one_year_after(accepted_at)
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO user_profiles(
+                   user_id, full_name, locality, consent_status, consent_at, consent_expires_at,
+                   onboarding_step, consent_version
+               ) VALUES (?, NULL, NULL, 'accepted', ?, ?, 'locality', ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                   full_name=NULL, locality=NULL, consent_status='accepted', consent_at=excluded.consent_at,
+                   consent_expires_at=excluded.consent_expires_at, onboarding_step='locality',
+                   consent_version=excluded.consent_version""",
+            (user_id, accepted_at, expires_at, CONSENT_VERSION),
+        )
+        conn.commit()
+
+
+def save_user_locality(user_id: int, locality: str) -> None:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE user_profiles SET locality=?, onboarding_step='full_name' "
+            "WHERE user_id=? AND consent_status='accepted' AND consent_expires_at>?",
+            (locality, user_id, now_ts()),
+        )
+        conn.commit()
+
+
+def save_user_full_name(user_id: int, full_name: str) -> None:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE user_profiles SET full_name=?, onboarding_step='complete' "
+            "WHERE user_id=? AND consent_status='accepted' AND consent_expires_at>?",
+            (full_name, user_id, now_ts()),
+        )
+        conn.commit()
+
+
+def delete_user_personal_data(user_id: int) -> None:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        for table in ("answer_log", "test_results", "user_progress", "test_sessions"):
+            cur.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+        if user_id < 0 and "max_user_id" in table_column_names(conn, "max_user_map"):
+            cur.execute("DELETE FROM max_user_map WHERE max_user_id=?", (-user_id,))
+        cur.execute("DELETE FROM user_profiles WHERE user_id=?", (user_id,))
+        conn.commit()
+
+
+def purge_expired_personal_data() -> int:
+    timestamp = now_ts()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id FROM user_profiles WHERE consent_status='accepted' "
+            "AND (consent_expires_at<=? OR consent_version<>?)",
+            (timestamp, CONSENT_VERSION),
+        )
+        expired_ids = [int(row[0]) for row in cur.fetchall()]
+    for user_id in expired_ids:
+        delete_user_personal_data(user_id)
+    return len(expired_ids)
+
+
+def user_profile_is_complete(user_id: int) -> bool:
+    profile = get_user_profile(user_id)
+    if profile and (
+        int(profile.get("consent_expires_at") or 0) <= now_ts()
+        or profile.get("consent_version") != CONSENT_VERSION
+    ):
+        delete_user_personal_data(user_id)
+        return False
+    return bool(
+        profile
+        and profile.get("consent_status") == "accepted"
+        and profile.get("onboarding_step") == "complete"
+        and profile.get("full_name")
+        and profile.get("locality")
+    )
 
 
 def save_progress(
@@ -1385,6 +1519,43 @@ def _fetch_vk_user_names(vk, user_ids: list[int]) -> dict[int, str]:
     return out
 
 
+def _fetch_user_profiles(user_ids: list[int]) -> dict[int, dict[str, object]]:
+    profiles: dict[int, dict[str, object]] = {}
+    ids = sorted({int(user_id) for user_id in user_ids if user_id})
+    for offset in range(0, len(ids), 900):
+        part = ids[offset : offset + 900]
+        if not part:
+            continue
+        placeholders = ",".join("?" for _ in part)
+        with db_connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT user_id, full_name, locality, consent_at, consent_expires_at FROM user_profiles "
+                f"WHERE user_id IN ({placeholders}) AND consent_status='accepted' "
+                "AND consent_expires_at>? AND consent_version=?",
+                (*part, now_ts(), CONSENT_VERSION),
+            )
+            for user_id, full_name, locality, consent_at, consent_expires_at in cur.fetchall():
+                profiles[int(user_id)] = {
+                    "full_name": full_name or "",
+                    "locality": locality or "",
+                    "consent_at": consent_at,
+                    "consent_expires_at": consent_expires_at,
+                }
+    return profiles
+
+
+def _format_profile_consent(profile: dict[str, object] | None) -> str:
+    if not profile or not profile.get("consent_at"):
+        return "Нет подтверждения"
+    try:
+        accepted_at = datetime.fromtimestamp(int(profile["consent_at"]), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        expires_at = datetime.fromtimestamp(int(profile["consent_expires_at"]), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except (TypeError, ValueError, OSError):
+        return "Подтверждено; дата не определена"
+    return f"Да — {accepted_at}; действует до {expires_at}; версия {CONSENT_VERSION}"
+
+
 def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
     """Краткий текст итогов для Excel (без эмодзи)."""
     if not scores:
@@ -1609,7 +1780,9 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
     headers = [
         "№ (новый пользователь — новый номер)",
         "Ссылка на пользователя",
-        "Имя и фамилия",
+        "Имя аккаунта / ФИО",
+        "Населённый пункт",
+        "Согласие на обработку ПДн",
         "Название теста",
         "Завершил",
         "Дата и время",
@@ -1705,6 +1878,17 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
     for row in answer_rows:
         all_uids.append(int(row[2]))
     name_by_uid = _fetch_vk_user_names(vk, all_uids)
+    profile_by_uid = _fetch_user_profiles(all_uids)
+    display_name_by_uid: dict[int, str] = {}
+    consent_text_by_uid: dict[int, str] = {}
+    for profile_uid, profile in profile_by_uid.items():
+        account_name = name_by_uid.get(profile_uid, "").strip()
+        full_name = str(profile.get("full_name") or "").strip()
+        if full_name and account_name and account_name.casefold() != full_name.casefold():
+            display_name_by_uid[profile_uid] = f"{account_name} — ФИО: {full_name}"
+        else:
+            display_name_by_uid[profile_uid] = full_name or account_name
+        consent_text_by_uid[profile_uid] = _format_profile_consent(profile)
 
     merged: list[tuple] = []
     for rid, uid, tid_raw, finished_at, scores_json, top3_json in result_rows:
@@ -1734,7 +1918,9 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
             user_serial[uid] = next_serial
             next_serial += 1
         no = user_serial[uid]
-        display_name = name_by_uid.get(uid, "")
+        display_name = display_name_by_uid.get(uid, name_by_uid.get(uid, ""))
+        locality = str(profile_by_uid.get(uid, {}).get("locality", ""))
+        consent_text = consent_text_by_uid.get(uid, "Нет подтверждения")
         test_name = _test_title_for_export(tid)
         if kind == "result":
             finished_txt = "Да"
@@ -1780,23 +1966,35 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
         ws.cell(row=r, column=1, value=no)
         _apply_user_link(ws.cell(row=r, column=2), uid)
         ws.cell(row=r, column=3, value=display_name)
-        ws.cell(row=r, column=4, value=test_name)
-        ws.cell(row=r, column=5, value=finished_txt)
-        ws.cell(row=r, column=6, value=dt)
-        ws.cell(row=r, column=7, value=summary)
-        ws.row_dimensions[r].height = max(15, 15 * _estimate_lines(summary, 100))
+        ws.cell(row=r, column=4, value=locality)
+        ws.cell(row=r, column=5, value=consent_text)
+        ws.cell(row=r, column=6, value=test_name)
+        ws.cell(row=r, column=7, value=finished_txt)
+        ws.cell(row=r, column=8, value=dt)
+        ws.cell(row=r, column=9, value=summary)
+        ws.row_dimensions[r].height = max(
+            15,
+            15 * max(
+                _estimate_lines(summary, 100),
+                _estimate_lines(display_name, 30),
+                _estimate_lines(locality, 24),
+                _estimate_lines(consent_text, 32),
+            ),
+        )
 
     _style_sheet_grid(
         ws,
-        widths={1: 7, 2: 24, 3: 26, 4: 34, 5: 11, 6: 20, 7: 100},
-        wrap_cols=[3, 4, 7],
+        widths={1: 7, 2: 24, 3: 34, 4: 24, 5: 42, 6: 34, 7: 11, 8: 20, 9: 100},
+        wrap_cols=[3, 4, 5, 6, 9],
     )
 
     ws_ans = wb.create_sheet("ответы")
     ans_headers = [
         "№ (новый пользователь — новый номер)",
         "Ссылка на пользователя",
-        "Имя и фамилия",
+        "Имя аккаунта / ФИО",
+        "Населённый пункт",
+        "Согласие на обработку ПДн",
         "Название теста",
         "Вопрос",
         "Ответ",
@@ -1817,27 +2015,39 @@ def build_stats_excel_bytes(vk, since: int | None = None, until: int | None = No
         if not answer:
             answer = str(_akey or "")
         result = _format_answer_result(_wjson)
+        display_name = display_name_by_uid.get(_uid, name_by_uid.get(_uid, ""))
+        locality = str(profile_by_uid.get(_uid, {}).get("locality", ""))
+        consent_text = consent_text_by_uid.get(_uid, "Нет подтверждения")
         r = ws_ans.max_row + 1
         first_of_user = len(ans_sheet_uids) == 1 or ans_sheet_uids[-2] != _uid
         if first_of_user:
             ws_ans.cell(row=r, column=1, value=user_serial[_uid])
             _apply_user_link(ws_ans.cell(row=r, column=2), _uid)
-            name_cell = ws_ans.cell(row=r, column=3, value=name_by_uid.get(_uid, ""))
+            name_cell = ws_ans.cell(row=r, column=3, value=display_name)
             name_cell.alignment = openpyxl.styles.Alignment(vertical="top", wrap_text=True)
-            ws_ans.cell(row=r, column=4, value=_test_title_for_export(_tid))
-        ws_ans.cell(row=r, column=5, value=question)
-        ws_ans.cell(row=r, column=6, value=answer)
-        ws_ans.cell(row=r, column=7, value=result)
+            ws_ans.cell(row=r, column=4, value=locality)
+            ws_ans.cell(row=r, column=5, value=consent_text)
+            ws_ans.cell(row=r, column=6, value=_test_title_for_export(_tid))
+        ws_ans.cell(row=r, column=7, value=question)
+        ws_ans.cell(row=r, column=8, value=answer)
+        ws_ans.cell(row=r, column=9, value=result)
         ws_ans.row_dimensions[r].height = max(
             15,
-            15 * max(_estimate_lines(question, 70), _estimate_lines(result, 45), 1),
+            15 * max(
+                _estimate_lines(question, 70),
+                _estimate_lines(result, 45),
+                _estimate_lines(display_name, 30),
+                _estimate_lines(locality, 24),
+                _estimate_lines(consent_text, 32),
+                1,
+            ),
         )
 
-    _merge_user_columns(ws_ans, uids=ans_sheet_uids, max_col=4)
+    _merge_user_columns(ws_ans, uids=ans_sheet_uids, max_col=6)
     _style_sheet_grid(
         ws_ans,
-        widths={1: 7, 2: 24, 3: 26, 4: 34, 5: 70, 6: 24, 7: 45},
-        wrap_cols=[3, 4, 5, 6, 7],
+        widths={1: 7, 2: 24, 3: 34, 4: 24, 5: 42, 6: 34, 7: 70, 8: 24, 9: 45},
+        wrap_cols=[3, 4, 5, 6, 7, 8, 9],
     )
 
     bio = io.BytesIO()
@@ -1893,7 +2103,7 @@ def send_stats_export(
     note = (
         f"Excel ({period_human}): лист «сводка» — завершённые тесты ({n_done}) + незавершённые сессии ({n_open}); "
         f"лист «ответы» — все пошаговые ответы из журнала ({n_ans}).\n"
-        "Колонка C на сводке — имя и фамилия из соответствующей платформы. Колонка «№» — порядковый номер пользователя по первому появлению в хронологии.\n"
+        "Колонки C–E — имя аккаунта с ФИО, населённый пункт и подтверждение согласия с датами действия. Колонка «№» — порядковый номер пользователя по первому появлению в хронологии.\n"
         "Команды: «отчет все время», «отчет квартал», «отчет месяц», «отчет неделя»; «сегодня» / «за сегодня» — только текущие сутки по МСК; "
         "«выгрузка» или /stats — всё время."
     )
@@ -1986,10 +2196,18 @@ def users_for_reminder():
             SELECT user_id
             FROM user_progress
             WHERE status='in_progress'
+              AND test_id NOT IN (?, ?)
               AND last_activity_at <= ?
               AND (reminded_at IS NULL OR reminded_at <= ?)
+              AND EXISTS (
+                  SELECT 1 FROM user_profiles p
+                  WHERE p.user_id=user_progress.user_id
+                    AND p.consent_status='accepted'
+                    AND p.onboarding_step='complete'
+                    AND p.consent_expires_at > ?
+              )
             """,
-            (inactive_threshold, repeat_threshold),
+            (TEST_JOVASHI, TEST_HOLLAND_RIASEC, inactive_threshold, repeat_threshold, ts),
         )
         rows = cur.fetchall()
         return [r[0] for r in rows]
@@ -2050,14 +2268,17 @@ def build_reminder_continue_keyboard():
     return kb.get_keyboard()
 
 
+def build_consent_keyboard():
+    kb = VkKeyboard(one_time=True, inline=True)
+    kb.add_button("1 — Да, согласен(на)", color=VkKeyboardColor.POSITIVE)
+    kb.add_button("2 — Нет, не согласен(на)", color=VkKeyboardColor.NEGATIVE)
+    return kb.get_keyboard()
+
+
 def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
     kb.add_button(KB_KLIMOV_SELF, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_OPG, color=VkKeyboardColor.POSITIVE)
-    kb.add_button(KB_HOLLAND, color=VkKeyboardColor.POSITIVE)
-    kb.add_line()
-    kb.add_button(KB_PROF_TABLE, color=VkKeyboardColor.POSITIVE)
-    kb.add_line()
     kb.add_button(KB_YOVASHI, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
@@ -2069,6 +2290,8 @@ def build_menu_keyboard():
     kb.add_button(KB_EN57, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button("Меню", color=VkKeyboardColor.SECONDARY)
+    kb.add_line()
+    kb.add_button("Отозвать согласие", color=VkKeyboardColor.NEGATIVE)
     return kb.get_keyboard()
 
 
@@ -2159,18 +2382,7 @@ def render_question(test_id: str, step: int, scores: dict | None = None) -> str:
         label = _display_answer_label(opt[0] if isinstance(opt[0], str) else str(opt[0]))
         lines.append(f"{key}) {label}")
     n = len(keys)
-    if n > 6:
-        lines.append(f"\nВыберите ответ кнопкой с 1 по {n}.")
-    elif n == 6:
-        lines.append("\nВыберите ответ кнопкой 1, 2, 3, 4, 5 или 6.")
-    elif n == 5:
-        lines.append("\nВыберите ответ кнопкой 1, 2, 3, 4 или 5.")
-    elif n == 4:
-        lines.append("\nВыберите ответ кнопкой 1, 2, 3 или 4.")
-    elif n == 3:
-        lines.append("\nВыберите ответ кнопкой 1, 2 или 3.")
-    else:
-        lines.append("\nВыберите ответ кнопкой 1 или 2.")
+    lines.append("\nВыберите вариант кнопкой.")
     return "\n".join(lines)
 
 
@@ -2242,7 +2454,7 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
         send_message(
             vk,
             user_id,
-            "Не удалось посчитать результат. Откройте меню и начните тест заново.",
+            "Не удалось посчитать результат. Напишите «меню» и начните тест заново.",
             keyboard=build_menu_keyboard(),
         )
         return
@@ -2404,6 +2616,17 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
 
 def start_test(vk, user_id: int, test_id: str):
     tid = normalize_test_id(test_id)
+    if not user_profile_is_complete(user_id):
+        send_welcome(vk, user_id)
+        return
+    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+        send_message(
+            vk,
+            user_id,
+            "Этот тест больше недоступен. Напишите «меню», чтобы выбрать другой.",
+            keyboard=build_menu_keyboard(),
+        )
+        return
     scores = empty_scores(tid)
     session_id = create_test_session(user_id, tid)
     save_progress(
@@ -2415,7 +2638,7 @@ def start_test(vk, user_id: int, test_id: str):
         last_session_id=session_id,
     )
     nq = _opg_effective_question_count(tid)
-    intro = f"«{_label_for_test(tid)}» запущен.\nВопросов: {nq}."
+    intro = f"Начинаем тест «{_label_for_test(tid)}». Вопросов: {nq}."
     _kb_scores = scores if tid == TEST_OPG else None
     send_message(vk, user_id, intro, keyboard=keyboard_for_test(tid, 0, _kb_scores))
     send_question_message(
@@ -2428,8 +2651,112 @@ def start_test(vk, user_id: int, test_id: str):
     )
 
 
+_CONSENT_PROMPTED_USERS: set[int] = set()
+
+
+def _send_consent_prompt(vk, user_id: int) -> None:
+    _CONSENT_PROMPTED_USERS.add(int(user_id))
+    send_message(vk, user_id, CONSENT_TEXT, keyboard=build_consent_keyboard())
+
+
 def send_welcome(vk, user_id: int):
-    send_message(vk, user_id, WELCOME_TEXT, keyboard=build_menu_keyboard())
+    profile = get_user_profile(user_id)
+    if profile and (
+        int(profile.get("consent_expires_at") or 0) <= now_ts()
+        or profile.get("consent_version") != CONSENT_VERSION
+    ):
+        delete_user_personal_data(user_id)
+        profile = None
+    if not profile or profile.get("consent_status") != "accepted":
+        _send_consent_prompt(vk, user_id)
+    elif not profile.get("locality"):
+        send_message(vk, user_id, "Укажите ваш населённый пункт: город, село, деревню или посёлок.")
+    elif not profile.get("full_name"):
+        send_message(vk, user_id, "Напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
+    else:
+        send_message(vk, user_id, WELCOME_TEXT, keyboard=build_menu_keyboard())
+
+
+def _valid_full_name(value: str) -> bool:
+    parts = value.split()
+    return (
+        2 <= len(parts) <= 4
+        and all(any(char.isalpha() for char in part) and all(char.isalpha() or char in "-'’" for char in part) for part in parts)
+    )
+
+
+def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
+    """Collect explicit consent first, then the locality and full name; tests stay locked until complete."""
+    stripped = " ".join(_strip_command_text(text).split())
+    command = _normalize_cmd(stripped)
+    profile = get_user_profile(user_id)
+    if profile and (
+        int(profile.get("consent_expires_at") or 0) <= now_ts()
+        or profile.get("consent_version") != CONSENT_VERSION
+    ):
+        delete_user_personal_data(user_id)
+        profile = None
+
+    if profile and profile.get("consent_status") == "accepted" and profile.get("onboarding_step") == "complete":
+        return False
+
+    if command in (
+        "привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi",
+        "ддо", "климов", "самооценка", "климов30", "опг", "opg", "таблица", "таблица опт", "опт",
+        "таблица (опт проф.)",
+        "голланд", "holland", "riasec", "йовайши", "йоваши", "yovashi", "iovashi", "jovashi",
+        "кеттелл", "kettell", "cattell", "16pf", "16пф", "16pfc", "16пфс", "16pf/c (мол.)",
+        "кот", "kot", "эн-60", "эн60", "эн - 60", "en-60", "en60", "эн-57", "эн57", "эн - 57", "en-57", "en57",
+    ):
+        send_welcome(vk, user_id)
+        return True
+
+    if not profile or profile.get("consent_status") != "accepted":
+        if int(user_id) not in _CONSENT_PROMPTED_USERS:
+            _send_consent_prompt(vk, user_id)
+            return True
+        if command in ("1", "да", "согласен", "согласна") or command.startswith("1 "):
+            _CONSENT_PROMPTED_USERS.discard(int(user_id))
+            accept_user_consent(user_id)
+            send_message(vk, user_id, "Согласие принято. Укажите ваш населённый пункт: город, село, деревню или посёлок.")
+            return True
+        if command in ("2", "нет", "не согласен", "не согласна") or command.startswith("2 "):
+            _CONSENT_PROMPTED_USERS.discard(int(user_id))
+            delete_user_personal_data(user_id)
+            send_message(
+                vk,
+                user_id,
+                "Согласие не принято. Анкета, ответы и результаты удалены; тесты недоступны. "
+                "Если захотите продолжить позже, отправьте «/start».",
+            )
+            return True
+        _send_consent_prompt(vk, user_id)
+        return True
+
+    if profile.get("onboarding_step") == "locality" or not profile.get("locality"):
+        locality = stripped[:120]
+        if (
+            len(locality) < 3
+            or command in ("1", "2", "да", "нет", "меню", "/start", "отозвать согласие")
+            or not any(char.isalpha() for char in locality)
+        ):
+            send_message(vk, user_id, "Напишите населённый пункт словами, например: Ижевск или село Завьялово.")
+            return True
+        save_user_locality(user_id, locality)
+        send_message(vk, user_id, "Теперь напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
+        return True
+
+    if profile.get("onboarding_step") == "full_name" or not profile.get("full_name"):
+        full_name = stripped[:160]
+        if not _valid_full_name(full_name):
+            send_message(vk, user_id, "Укажите ФИО: фамилию и имя, а если есть — отчество. Используйте буквы и дефис.")
+            return True
+        save_user_full_name(user_id, full_name)
+        send_welcome(vk, user_id)
+        return True
+
+    send_welcome(vk, user_id)
+    return True
 
 
 def _option_weights(option_val):
@@ -2440,17 +2767,29 @@ def _option_weights(option_val):
 
 
 def handle_answer(vk, user_id: int, text: str):
+    if not user_profile_is_complete(user_id):
+        send_welcome(vk, user_id)
+        return
     progress = get_progress(user_id)
     if not progress or progress["status"] != "in_progress":
         send_message(
             vk,
             user_id,
-            "Сейчас нет активного теста. Напишите «меню» или выберите тест кнопкой.",
+            "Активного теста нет. Напишите «меню» и выберите тест.",
             keyboard=build_menu_keyboard(),
         )
         return
     test_id = progress["test_id"]
     tid = normalize_test_id(test_id)
+    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+        abandon_progress(user_id, progress.get("last_session_id"))
+        send_message(
+            vk,
+            user_id,
+            "Этот тест больше недоступен. Напишите «меню», чтобы выбрать другой.",
+            keyboard=build_menu_keyboard(),
+        )
+        return
     touch_progress(user_id)
     step = progress["step"]
     qs = questions_for(tid)
@@ -2477,7 +2816,7 @@ def handle_answer(vk, user_id: int, text: str):
         send_message(
             vk,
             user_id,
-            f"Пожалуйста, используйте кнопки {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
+            f"Выберите один из вариантов: {' / '.join(sorted(valid, key=lambda x: int(x)))}.",
             keyboard=keyboard_for_test(tid, step, _kb_scores),
         )
         send_question_message(
@@ -2596,6 +2935,15 @@ def handle_answer(vk, user_id: int, text: str):
             last_session_id=sid,
         )
         finish_test(vk, user_id, tid, scores)
+
+
+def personal_data_cleanup_worker():
+    while True:
+        try:
+            purge_expired_personal_data()
+        except Exception as e:
+            print(f"[personal_data_cleanup] error: {e}")
+        time.sleep(3600)
 
 
 def reminder_worker():
@@ -2882,7 +3230,19 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         return False
     if not progress.get("reminder_pending"):
         return False
-    tid = progress["test_id"]
+    tid = normalize_test_id(progress["test_id"])
+    if not user_profile_is_complete(user_id):
+        send_welcome(vk, user_id)
+        return True
+    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+        abandon_progress(user_id, progress.get("last_session_id"))
+        send_message(
+            vk,
+            user_id,
+            "Этот тест больше недоступен. Напишите «меню», чтобы выбрать другой.",
+            keyboard=build_menu_keyboard(),
+        )
+        return True
     step = progress["step"]
     scores_m = progress.get("scores")
     _kb_scores = scores_m if tid == TEST_OPG else None
@@ -2895,7 +3255,7 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
         send_message(
             vk,
             user_id,
-            "Тест остановлен. Можно выбрать другую методику.",
+            "Тест остановлен. Выберите другой в меню.",
             keyboard=build_menu_keyboard(),
         )
         return True
@@ -2912,11 +3272,23 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
 
 
 def dispatch_command(vk, user_id: int, text: str) -> bool:
-    """Обрабатывает команды меню. Возвращает True, если сообщение обработано."""
+    """Обрабатывает команды анкеты и меню. Возвращает True, если сообщение обработано."""
     stripped = _strip_command_text(text)
     t = _normalize_cmd(stripped)
+    if t in ("отозвать согласие", "удалить мои данные", "удалить анкету"):
+        delete_user_personal_data(user_id)
+        _CONSENT_PROMPTED_USERS.discard(int(user_id))
+        send_message(
+            vk,
+            user_id,
+            "Согласие отозвано. Анкета, ответы, результаты и текущий прогресс удалены. "
+            "Чтобы начать заново, отправьте «/start».",
+        )
+        return True
     if _wants_stats_export(text):
         return handle_stats_command(vk, user_id, text)
+    if handle_onboarding_message(vk, user_id, text):
+        return True
     if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
         send_welcome(vk, user_id)
         return True
@@ -2928,9 +3300,6 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         return True
     if t in ("опг", "opg"):
         start_test(vk, user_id, TEST_OPG)
-        return True
-    if t in ("таблица", "таблица опт", "опт"):
-        start_test(vk, user_id, TEST_JOVASHI)
         return True
     if t in ("йовайши", "йоваши", "yovashi", "iovashi", "jovashi"):
         start_test(vk, user_id, TEST_YOVASHI)
@@ -2951,18 +3320,12 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t.replace(" ", "") in ("эн-57", "эн57", "en-57", "en57"):
         start_test(vk, user_id, TEST_EN57)
         return True
-    if t in ("голланд", "holland", "riasec"):
-        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
-        return True
     # Подписи с клавиатуры (с заглавной)
     if stripped == KB_KLIMOV_SELF:
         start_test(vk, user_id, TEST_KLIMOV_SELF)
         return True
     if stripped == KB_OPG:
         start_test(vk, user_id, TEST_OPG)
-        return True
-    if stripped == KB_PROF_TABLE:
-        start_test(vk, user_id, TEST_JOVASHI)
         return True
     if stripped == KB_YOVASHI:
         start_test(vk, user_id, TEST_YOVASHI)
@@ -2982,8 +3345,13 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if stripped == KB_EN57:
         start_test(vk, user_id, TEST_EN57)
         return True
-    if stripped == KB_HOLLAND:
-        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
+    if t in ("таблица", "таблица опт", "опт", "голланд", "holland", "riasec") or stripped in (KB_PROF_TABLE, KB_HOLLAND):
+        send_message(
+            vk,
+            user_id,
+            "Этот тест больше недоступен. Напишите «меню», чтобы выбрать другой.",
+            keyboard=build_menu_keyboard(),
+        )
         return True
     return False
 
@@ -2998,6 +3366,8 @@ def main():
             "Не задан или неверный VK_GROUP_ID. Укажите целое число — ID группы для VkBotLongPoll (в Variables на Railway)."
         )
     init_db()
+    purge_expired_personal_data()
+    threading.Thread(target=personal_data_cleanup_worker, daemon=True).start()
     threading.Thread(target=reminder_worker, daemon=True).start()
     vk_session = vk_api.VkApi(token=VK_TOKEN)
     vk = vk_session.get_api()
@@ -3028,11 +3398,9 @@ def main():
                     continue
                 raw_cmd = _event_command_text_candidates(event, msg)
                 if STATS_DEBUG:
-                    preview = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
-                    preview = preview.replace("\n", "\\n")
                     print(
                         f"[stats_debug] type={event.type} from_id={user_id} peer={peer_id} "
-                        f"text_len={len(raw_cmd)} preview={preview!r}"
+                        f"text_len={len(raw_cmd)}"
                     )
                 text_stripped = _strip_command_text(raw_cmd)
                 text_lower = text_stripped.lower()

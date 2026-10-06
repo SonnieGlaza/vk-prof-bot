@@ -504,9 +504,12 @@ def _ensure_max_tables() -> None:
 def _remember_max_user(user: dict) -> int:
     raw_id = int(user.get("user_id") or user.get("id") or 0)
     internal_id = _core_user_id(raw_id)
-    first = str(user.get("first_name") or "")
-    last = str(user.get("last_name") or "")
-    username = str(user.get("username") or "")
+    if not core.user_profile_is_complete(internal_id):
+        return internal_id
+    profile = core.get_user_profile(internal_id) or {}
+    first = str(profile.get("full_name") or "")
+    last = ""
+    username = ""
     with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -537,14 +540,43 @@ def _stable_update_key(update: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _queue_safe_update_payload(update: dict) -> str:
+    safe_update = json.loads(json.dumps(update, ensure_ascii=False))
+    message = safe_update.get("message") or {}
+    sender = message.get("sender") or safe_update.get("user") or {}
+    raw_user_id = int(sender.get("user_id") or sender.get("id") or 0)
+    if raw_user_id > 0:
+        internal_id = _core_user_id(raw_user_id)
+        profile = core.get_user_profile(internal_id)
+        consented = bool(
+            profile
+            and profile.get("consent_status") == "accepted"
+            and profile.get("consent_version") == core.CONSENT_VERSION
+            and int(profile.get("consent_expires_at") or 0) > core.now_ts()
+        )
+        if not consented:
+            for user_object in (sender, safe_update.get("user")):
+                if isinstance(user_object, dict):
+                    for field in ("first_name", "last_name", "username"):
+                        user_object.pop(field, None)
+            message_body = (safe_update.get("message") or {}).get("body") or {}
+            text = str(message_body.get("text") or "").strip().casefold()
+            consent_reply = text.startswith(("1", "2")) or text in ("да", "нет", "согласен", "согласна", "не согласен", "не согласна")
+            start_message = text in ("/start", "старт", "start", "привет", "меню", "начать", "hello", "hi")
+            if not consent_reply and not start_message:
+                message_body["text"] = ""
+    return json.dumps(safe_update, ensure_ascii=False)
+
+
 def _enqueue_update(update: dict) -> None:
     key = _stable_update_key(update)
+    safe_payload = _queue_safe_update_payload(update)
     with _db_session() as conn:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO max_webhook_queue(update_key, received_at, payload_json, status)
                VALUES (?, ?, ?, 'pending') ON CONFLICT(update_key) DO NOTHING""",
-            (key, int(time.time() * 1000), json.dumps(update, ensure_ascii=False)),
+            (key, int(time.time() * 1000), safe_payload),
         )
         inserted = cur.rowcount > 0
         conn.commit()
@@ -593,13 +625,14 @@ def _process_update_inline(api: MaxApiCompat, update: dict) -> None:
     дообработает её (страховка от потери).
     """
     key = _stable_update_key(update)
+    safe_payload = _queue_safe_update_payload(update)
     try:
         with _db_session() as conn:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO max_webhook_queue(update_key, received_at, payload_json, status) "
                 "VALUES (?, ?, ?, 'processing') ON CONFLICT(update_key) DO NOTHING",
-                (key, int(time.time() * 1000), json.dumps(update, ensure_ascii=False)),
+                (key, int(time.time() * 1000), safe_payload),
             )
             conn.commit()
     except Exception:
@@ -668,7 +701,7 @@ def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
     if not _dedup_max_message(dedup_peer_id, message_hash):
         log.info("[MAX] skip: duplicate message id=%s", message_id)
         return
-    log.info("[MAX] dispatch: type=%s user=%s chat=%s text=%r", update_type, raw_user_id, target_chat, text)
+    log.info("[MAX] dispatch: type=%s user=%s chat=%s text_len=%d", update_type, raw_user_id, target_chat, len(text))
 
     peer_token = core._REPLY_PEER_ID.set(reply_peer_id)
     target_token = MAX_SEND_TARGET.set(target)
@@ -680,6 +713,11 @@ def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
         if core.dispatch_command(api, internal_user_id, text):
             log.info("[MAX] command handled")
             return
+        # Последний барьер на MAX: ни ответ цифрой, ни напоминание не обходят анкету/согласие из общего ядра.
+        if not core.user_profile_is_complete(internal_user_id):
+            core.send_welcome(api, internal_user_id)
+            log.info("[MAX] onboarding required; test input blocked")
+            return
         if core.handle_reminder_continue_choice(api, internal_user_id, text):
             log.info("[MAX] reminder choice handled")
             return
@@ -687,7 +725,7 @@ def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
             core.handle_answer(api, internal_user_id, text.strip())
             log.info("[MAX] answer handled")
         else:
-            log.info("[MAX] fallback: %r", text)
+            log.info("[MAX] fallback: text_len=%d", len(text))
             core.send_message(
                 api,
                 internal_user_id,
@@ -795,10 +833,9 @@ class MaxWebhookHandler(BaseHTTPRequestHandler):
                 raise ValueError("update must be an object")
             update_type = update.get("update_type")
             log.info(
-                "[MAX] webhook POST: type=%s size=%d snippet=%s",
+                "[MAX] webhook POST: type=%s size=%d",
                 update_type,
                 length,
-                raw_body[:300].decode("utf-8", "replace"),
             )
             if update_type in ("message_created", "bot_started"):
                 _process_update_inline(self.api, update)
@@ -848,7 +885,9 @@ def main() -> None:
         log.warning("SQLite is local to this service; for VK/MAX shared state set the same DATABASE_URL PostgreSQL on both services")
 
     core.init_db()
+    core.purge_expired_personal_data()
     _ensure_max_tables()
+    threading.Thread(target=core.personal_data_cleanup_worker, name="max-data-cleanup", daemon=True).start()
     api = MaxApiCompat(MAX_BOT_TOKEN)
     MaxWebhookHandler.api = api
     server = ThreadingHTTPServer(("0.0.0.0", int(os.getenv("PORT", "8000"))), MaxWebhookHandler)
