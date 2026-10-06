@@ -859,12 +859,32 @@ def accept_user_consent(user_id: int) -> None:
         conn.commit()
 
 
+def refuse_user_consent(user_id: int) -> None:
+    """Отказ от обработки персональных данных: тесты остаются доступны,
+    в выгрузках доносит consent_status='refused'."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO user_profiles(
+                  user_id, full_name, locality, consent_status, consent_at, consent_expires_at,
+                  onboarding_step, consent_version
+              ) VALUES (?, NULL, NULL, 'refused', 0, 0, 'locality', ?)
+              ON CONFLICT(user_id) DO UPDATE SET
+                  consent_status='refused',
+                  onboarding_step='locality',
+                  consent_version=excluded.consent_version""",
+            (user_id, CONSENT_VERSION),
+        )
+        conn.commit()
+
+
 def save_user_locality(user_id: int, locality: str) -> None:
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
             "UPDATE user_profiles SET locality=?, onboarding_step='complete' "
-            "WHERE user_id=? AND consent_status='accepted' AND consent_expires_at>?",
+            "WHERE user_id=? AND ("
+            "(consent_status='accepted' AND consent_expires_at>?) OR consent_status='refused')",
             (locality, user_id, now_ts()),
         )
         conn.commit()
@@ -926,7 +946,7 @@ def user_profile_is_complete(user_id: int) -> bool:
         return False
     return bool(
         profile
-        and profile.get("consent_status") == "accepted"
+        and profile.get("consent_status") in ("accepted", "refused")
         and profile.get("onboarding_step") == "complete"
         and profile.get("full_name")
         and profile.get("locality")
@@ -1532,6 +1552,8 @@ def _fetch_vk_user_names(vk, user_ids: list[int]) -> dict[int, str]:
 
 
 def _fetch_user_profiles(user_ids: list[int]) -> dict[int, dict[str, object]]:
+    """Профили онбординга: принявшие согласие (действующее) и отказавшиеся —
+    оба попадают в выгрузки, колонка согласия покажет Да/Нет."""
     profiles: dict[int, dict[str, object]] = {}
     ids = sorted({int(user_id) for user_id in user_ids if user_id})
     for offset in range(0, len(ids), 900):
@@ -1542,23 +1564,29 @@ def _fetch_user_profiles(user_ids: list[int]) -> dict[int, dict[str, object]]:
         with db_connect() as conn:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT user_id, full_name, locality, consent_at, consent_expires_at FROM user_profiles "
-                f"WHERE user_id IN ({placeholders}) AND consent_status='accepted' "
-                "AND consent_expires_at>? AND consent_version=?",
+                f"SELECT user_id, full_name, locality, consent_at, consent_expires_at, consent_status FROM user_profiles "
+                f"WHERE user_id IN ({placeholders}) AND ("
+                "(consent_status='accepted' AND consent_expires_at>? AND consent_version=?) "
+                "OR consent_status='refused')",
                 (*part, now_ts(), CONSENT_VERSION),
             )
-            for user_id, full_name, locality, consent_at, consent_expires_at in cur.fetchall():
+            for user_id, full_name, locality, consent_at, consent_expires_at, consent_status in cur.fetchall():
                 profiles[int(user_id)] = {
                     "full_name": full_name or "",
                     "locality": locality or "",
                     "consent_at": consent_at,
                     "consent_expires_at": consent_expires_at,
+                    "consent_status": consent_status or "",
                 }
     return profiles
 
 
 def _format_profile_consent(profile: dict[str, object] | None) -> str:
-    if not profile or not profile.get("consent_at"):
+    if not profile:
+        return "Нет подтверждения"
+    if str(profile.get("consent_status") or "") == "refused":
+        return "Нет (отказ от обработки)"
+    if not profile.get("consent_at"):
         return "Нет подтверждения"
     try:
         accepted_at = datetime.fromtimestamp(int(profile["consent_at"]), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -2694,7 +2722,7 @@ def send_welcome(vk, user_id: int):
     if not profile or not profile.get("full_name"):
         send_message(vk, user_id, WELCOME_INTRO)
         send_message(vk, user_id, "Напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
-    elif profile.get("consent_status") != "accepted":
+    elif profile.get("consent_status") not in ("accepted", "refused"):
         _send_consent_prompt(vk, user_id)
     elif not profile.get("locality"):
         send_message(vk, user_id, "Укажите ваш населённый пункт: город, село, деревню или посёлок.")
@@ -2722,7 +2750,7 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
         delete_user_personal_data(user_id)
         profile = None
 
-    if profile and profile.get("consent_status") == "accepted" and profile.get("onboarding_step") == "complete":
+    if profile and profile.get("onboarding_step") == "complete" and profile.get("consent_status") in ("accepted", "refused"):
         return False
 
     if command in (
@@ -2748,14 +2776,14 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
             return True
         save_user_full_name(user_id, full_name)
         send_message(vk, user_id, "ФИО сохранены.")
-        if profile and profile.get("consent_status") == "accepted":
+        if profile and profile.get("consent_status") in ("accepted", "refused"):
             send_welcome(vk, user_id)
         else:
             _send_consent_prompt(vk, user_id)
         return True
 
     # Шаг 2: согласие на обработку персональных данных.
-    if profile.get("consent_status") != "accepted":
+    if profile.get("consent_status") not in ("accepted", "refused"):
         if int(user_id) not in _CONSENT_PROMPTED_USERS:
             _send_consent_prompt(vk, user_id)
             return True
@@ -2766,12 +2794,13 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
             return True
         if command in ("2", "нет", "не согласен", "не согласна") or command.startswith("2 "):
             _CONSENT_PROMPTED_USERS.discard(int(user_id))
-            delete_user_personal_data(user_id)
+            refuse_user_consent(user_id)
             send_message(
                 vk,
                 user_id,
-                "Согласие не принято. Анкета, ответы и результаты удалены; тесты недоступны. "
-                "Если захотите продолжить позже, отправьте «/start».",
+                "Принято: обработка персональных данных не разрешена. "
+                "Тесты останутся доступными, в выгрузках напротив вас будет отметка «Нет (отказ от обработки)». "
+                "Укажите ваш населённый пункт: город, село, деревню или посёлок.",
             )
             return True
         _send_consent_prompt(vk, user_id)
