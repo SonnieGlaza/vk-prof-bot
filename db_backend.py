@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import psycopg2
-from urllib.parse import urlparse
+import threading
 from typing import Any
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -12,6 +11,11 @@ _DB_DEFAULT = os.path.join(_BASE_DIR, "career_bot.db")
 DB_PATH = (os.environ.get("SQLITE_PATH") or os.environ.get("DB_PATH") or _DB_DEFAULT).strip() or _DB_DEFAULT
 
 _RAW_DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+
+# Переиспользуемое PG-соединение: одно на процесс (защищено RLock), чтобы не
+# платить за новое TLS-рукопожатие на каждый запрос (основная задержка ответа).
+_pg_lock = threading.RLock()
+_pg_conn = None
 
 
 def _pg_url() -> str:
@@ -22,6 +26,37 @@ def _pg_url() -> str:
 
 
 USE_PG = bool(_RAW_DATABASE_URL)
+
+
+def _new_pg_connection():
+    from urllib.parse import urlparse
+
+    import psycopg2  # лениво: psycopg2 весит при импорте
+
+    url = urlparse(_pg_url())
+    if not url.hostname or not url.port or not url.username or not url.password:
+        raise RuntimeError("DATABASE_URL is missing required components (host/port/user/password)")
+    return psycopg2.connect(
+        host=url.hostname,
+        port=url.port,
+        user=url.username,
+        password=url.password,
+        dbname=url.path.lstrip("/"),
+        sslmode="require",
+        connect_timeout=10,
+    )
+
+
+def _acquire_pg_conn():
+    global _pg_conn
+    if _pg_conn is None or _pg_conn.closed:
+        _pg_conn = _new_pg_connection()
+    try:
+        _pg_conn.rollback()
+    except Exception:
+        pass
+    return _pg_conn
+
 
 
 def sql(sqlite_sql: str) -> str:
@@ -62,9 +97,10 @@ class _Cursor:
 
 
 class _Connection:
-    def __init__(self, conn, pg: bool):
+    def __init__(self, conn, pg: bool, release=None):
         self._conn = conn
         self._pg = pg
+        self._release = release
 
     def cursor(self) -> _Cursor:
         return _Cursor(self._conn.cursor(), self._pg)
@@ -84,10 +120,23 @@ class _Connection:
         return self
 
     def __exit__(self, *args):
-        if USE_PG:
-            self._conn.close()
+        if self._release is not None:
+            # PG: возвращаем соединение в пул (rollback + снятие блокировки).
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            try:
+                self._release()
+            except Exception:
+                pass
         else:
-            self._conn.close()
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+        return False
+
 
 def db_connect():
     if not USE_PG:
@@ -96,20 +145,13 @@ def db_connect():
         conn.row_factory = sqlite3.Row
         return _Connection(conn, pg=False)
 
-    url = urlparse(os.getenv("DATABASE_URL"))
-    if not url.hostname or not url.port or not url.username or not url.password:
-        raise RuntimeError("DATABASE_URL is missing required components (host/port/user/password)")
-
-    conn = psycopg2.connect(
-        host=url.hostname,
-        port=url.port,
-        user=url.username,
-        password=url.password,
-        dbname=url.path.lstrip('/'),  # безопаснее, чем [1:]
-        sslmode="require",
-        connect_timeout=10,
-    )
-    return _Connection(conn, pg=True)
+    _pg_lock.acquire()
+    try:
+        conn = _acquire_pg_conn()
+    except Exception:
+        _pg_lock.release()
+        raise
+    return _Connection(conn, pg=True, release=_pg_lock.release)
 
 
 def table_column_names(conn: _Connection, table: str) -> set[str]:
