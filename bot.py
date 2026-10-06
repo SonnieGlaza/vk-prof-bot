@@ -552,6 +552,8 @@ CONSENT_TEXT = (
     "Нажмите кнопку или напишите 1 или 2.\n"
 )
 
+WELCOME_INTRO = "Привет! Я помогу пройти короткие опросники для профориентации и самопознания."
+
 WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания.\n"
     "Сначала бот попросит ваши ФИО, затем — согласие на обработку данных и населённый пункт.\n\n"
@@ -2279,10 +2281,16 @@ def build_reminder_continue_keyboard():
 
 
 def build_consent_keyboard():
-    kb = VkKeyboard(one_time=True, inline=True)
+    import json as _json
+
+    kb = VkKeyboard(inline=True)
     kb.add_button("1 — Да, согласен(на)", color=VkKeyboardColor.POSITIVE)
     kb.add_button("2 — Нет, не согласен(на)", color=VkKeyboardColor.NEGATIVE)
-    return kb.get_keyboard()
+    raw = kb.get_keyboard()
+    data = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+    # Для inline-клавиатуры VK запрещает поле one_time (ошибка 911): удаляем его.
+    data.pop("one_time", None)
+    return _json.dumps(data, ensure_ascii=False)
 
 
 def build_menu_keyboard():
@@ -2666,7 +2674,13 @@ _CONSENT_PROMPTED_USERS: set[int] = set()
 
 def _send_consent_prompt(vk, user_id: int) -> None:
     _CONSENT_PROMPTED_USERS.add(int(user_id))
-    send_message(vk, user_id, CONSENT_TEXT, keyboard=build_consent_keyboard())
+    profile = get_user_profile(user_id)
+    full_name = str((profile or {}).get("full_name") or "").strip()
+    text = CONSENT_TEXT
+    if full_name:
+        # Подставляем ФИО, которое пользователь указал на предыдущем шаге.
+        text = CONSENT_TEXT.replace("пользователь этого аккаунта мессенджера", full_name, 1)
+    send_message(vk, user_id, text, keyboard=build_consent_keyboard())
 
 
 def send_welcome(vk, user_id: int):
@@ -2678,6 +2692,7 @@ def send_welcome(vk, user_id: int):
         delete_user_personal_data(user_id)
         profile = None
     if not profile or not profile.get("full_name"):
+        send_message(vk, user_id, WELCOME_INTRO)
         send_message(vk, user_id, "Напишите ваши ФИО полностью (фамилия, имя и отчество, если есть).")
     elif profile.get("consent_status") != "accepted":
         _send_consent_prompt(vk, user_id)
