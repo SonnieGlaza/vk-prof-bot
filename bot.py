@@ -102,6 +102,11 @@ _REPLY_PEER_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar("rep
 _LONGPOLL_SEEN_MSG: dict[str, float] = {}
 _LONGPOLL_DEDUP_MEM_SEC = 30.0
 _LP_DEDUP_TBL = "longpoll_incoming_dedup"
+# --- Возврат на предыдущий вопрос (кнопка «← Назад») ---
+BACK_BUTTON_LABEL = "← Назад"
+BACK_HISTORY_KEY = "__back_history"
+BACK_COMMANDS = {"← назад", "назад", "⬅ назад", "←", "⬅"}
+
 _LP_DEDUP_CLEAN_EVERY = 200
 _lp_dedup_cleanup_counter = 0
 
@@ -1043,7 +1048,9 @@ def get_progress(user_id: int):
             sk = set(scores.keys())
             nq = len(QUESTIONS_KLIMOV_SELF)
             dirty = False
-            if sk != need:
+            extra = sk - need
+            history_ok = extra == {BACK_HISTORY_KEY} and isinstance(scores.get(BACK_HISTORY_KEY), list)
+            if not history_ok and sk != need:
                 merged = empty_scores(TEST_KLIMOV_SELF)
                 for k in need:
                     merged[k] = int(scores.get(k, 0) or 0)
@@ -1236,6 +1243,35 @@ def log_answer_row(
             ),
         )
         conn.commit()
+
+
+def delete_last_answer_log(session_id: int):
+    """Удаляет последнюю запись ответа сессии (при возврате «назад»)."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM answer_log WHERE id = (SELECT MAX(id) FROM answer_log WHERE session_id = ?)",
+            (session_id,),
+        )
+        conn.commit()
+
+
+def _last_answer_weights(session_id: int) -> dict | None:
+    """Веса последнего ответа сессии (fallback, если в scores нет истории возврата)."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT weights_json FROM answer_log WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def complete_test_session(session_id: int, user_id: int, scores: dict, status: str = "completed"):
@@ -2249,51 +2285,64 @@ def users_for_reminder():
         return [r[0] for r in rows]
 
 
-def build_answer_keyboard_binary():
+def _add_back_button(kb, show_back: bool = False):
+    """Добавляет кнопку «← Назад» на отдельной строке, если нужно."""
+    if show_back:
+        kb.add_line()
+        kb.add_button(BACK_BUTTON_LABEL, color=VkKeyboardColor.SECONDARY)
+
+
+def build_answer_keyboard_binary(show_back: bool = False):
     kb = VkKeyboard(one_time=False, inline=True)
     kb.add_button("1", color=VkKeyboardColor.PRIMARY)
     kb.add_button("2", color=VkKeyboardColor.PRIMARY)
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
-def build_answer_keyboard_jovashi():
+def build_answer_keyboard_jovashi(show_back: bool = False):
     kb = VkKeyboard(one_time=False, inline=True)
     kb.add_button("1", color=VkKeyboardColor.PRIMARY)
     kb.add_button("2", color=VkKeyboardColor.PRIMARY)
     kb.add_button("3", color=VkKeyboardColor.PRIMARY)
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
-def build_answer_keyboard_quad():
+def build_answer_keyboard_quad(show_back: bool = False):
     kb = VkKeyboard(one_time=False, inline=True)
     kb.add_button("1", color=VkKeyboardColor.PRIMARY)
     kb.add_button("2", color=VkKeyboardColor.PRIMARY)
     kb.add_button("3", color=VkKeyboardColor.PRIMARY)
     kb.add_button("4", color=VkKeyboardColor.PRIMARY)
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
-def build_answer_keyboard_five():
+def build_answer_keyboard_five(show_back: bool = False):
     kb = VkKeyboard(one_time=False, inline=True)
     for i in range(1, 6):
         kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
-def build_answer_keyboard_six():
+def build_answer_keyboard_six(show_back: bool = False):
     kb = VkKeyboard(one_time=False, inline=True)
     for i in range(1, 7):
         kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
-def build_answer_keyboard_many(n: int):
+def build_answer_keyboard_many(n: int, show_back: bool = False):
     """Кнопки 1..n в рядах по 5 (для задач с числовым выбором)."""
     kb = VkKeyboard(one_time=False, inline=True)
     for i in range(1, n + 1):
         kb.add_button(str(i), color=VkKeyboardColor.PRIMARY)
         if i % 5 == 0 and i < n:
             kb.add_line()
+    _add_back_button(kb, show_back)
     return kb.get_keyboard()
 
 
@@ -2345,17 +2394,18 @@ def keyboard_for_test(test_id: str, step: int = 0, scores: dict | None = None):
         nopts = len(qs[idx]["options"]) if 0 <= idx < len(qs) else 2
     else:
         nopts = len(qs[step]["options"]) if step < len(qs) else 2
+    show_back = tid != TEST_OPG and int(step) > 0
     if nopts > 6:
-        return build_answer_keyboard_many(nopts)
+        return build_answer_keyboard_many(nopts, show_back=show_back)
     if nopts == 6:
-        return build_answer_keyboard_six()
+        return build_answer_keyboard_six(show_back=show_back)
     if nopts == 5:
-        return build_answer_keyboard_five()
+        return build_answer_keyboard_five(show_back=show_back)
     if nopts == 4:
-        return build_answer_keyboard_quad()
+        return build_answer_keyboard_quad(show_back=show_back)
     if nopts == 3:
-        return build_answer_keyboard_jovashi()
-    return build_answer_keyboard_binary()
+        return build_answer_keyboard_jovashi(show_back=show_back)
+    return build_answer_keyboard_binary(show_back=show_back)
 
 
 def send_message(vk, user_id, message, keyboard=None, attachment=None):
@@ -2456,6 +2506,8 @@ def _label_for_test(test_id: str) -> str:
 
 def finish_test(vk, user_id: int, test_id: str, scores: dict):
     tid = normalize_test_id(test_id)
+    if tid != TEST_OPG and isinstance(scores, dict):
+        scores.pop(BACK_HISTORY_KEY, None)
     prog = get_progress(user_id)
     sid = prog.get("last_session_id") if prog else None
     store_scores = _opg_scores_storable(scores) if tid == TEST_OPG else scores
@@ -2821,6 +2873,53 @@ def _option_weights(option_val):
     raise ValueError("Некорректный формат варианта ответа")
 
 
+def _is_back_command(text: str) -> bool:
+    return (text or "").strip().lower() in BACK_COMMANDS
+
+
+def _go_back(vk, user_id: int, tid: str, step: int, scores: dict, progress: dict):
+    """Откат на один вопрос назад: вычитаем веса последнего ответа и перепоказываем вопрос."""
+    sid = progress.get("last_session_id")
+    if tid == TEST_OPG:
+        send_message(vk, user_id, "Вернуться на предыдущий вопрос в этом тесте нельзя.")
+        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step, scores), scores=scores)
+        return
+    if int(step) <= 0:
+        send_message(vk, user_id, "Это уже первый вопрос теста.")
+        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
+        return
+    weights = None
+    hist = scores.get(BACK_HISTORY_KEY)
+    if isinstance(hist, list) and hist:
+        last = hist.pop()
+        if isinstance(last, dict) and isinstance(last.get("weights"), dict):
+            weights = last["weights"]
+        if not hist:
+            scores.pop(BACK_HISTORY_KEY, None)
+    if weights is None and sid:
+        weights = _last_answer_weights(sid)
+    if not isinstance(weights, dict) or not weights:
+        send_message(vk, user_id, "Не получилось откатить ответ. Напишите «меню», если хотите начать заново.")
+        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
+        return
+    for ptype, value in weights.items():
+        if ptype in scores and isinstance(scores[ptype], (int, float)):
+            scores[ptype] = scores[ptype] - int(value)
+    new_step = int(step) - 1
+    save_progress(
+        user_id=user_id,
+        test_id=tid,
+        step=new_step,
+        scores=scores,
+        status="in_progress",
+        last_session_id=sid,
+    )
+    if sid:
+        delete_last_answer_log(sid)
+    send_message(vk, user_id, "⬅ Вернулись на один вопрос назад. Выберите вариант заново.")
+    send_question_message(vk, user_id, tid, new_step, keyboard=keyboard_for_test(tid, new_step))
+
+
 def handle_answer(vk, user_id: int, text: str):
     if not user_profile_is_complete(user_id):
         send_welcome(vk, user_id)
@@ -2866,6 +2965,10 @@ def handle_answer(vk, user_id: int, text: str):
         finish_test(vk, user_id, tid, scores)
         return
 
+    if _is_back_command(text):
+        _go_back(vk, user_id, tid, step, scores, progress)
+        return
+
     valid = set(qs[flat_i]["options"].keys())
     if text not in valid:
         send_message(
@@ -2902,6 +3005,12 @@ def handle_answer(vk, user_id: int, text: str):
     for ptype, value in weights.items():
         if ptype in scores:
             scores[ptype] = scores[ptype] + value
+    if tid != TEST_OPG:
+        hist = scores.get(BACK_HISTORY_KEY)
+        if not isinstance(hist, list):
+            hist = []
+            scores[BACK_HISTORY_KEY] = hist
+        hist.append({"step": int(step), "weights": dict(weights)})
     if tid == TEST_OPG:
         item = qs[flat_i]
         oi = item.get("opg_item")
