@@ -67,7 +67,6 @@ _STATS_EXPORT_SECRET_RAW = (os.environ.get("STATS_EXPORT_SECRET") or "").strip()
 # SQLite: SQLITE_PATH=/data/career_bot.db (том Railway). PostgreSQL: DATABASE_URL из сервиса БД.
 KLIMOV_SELF_PATH = os.path.join(_BASE, "klimov_self_table_questions.json")
 OPG_PATH = os.path.join(_BASE, "opg_questions.json")
-JOVASHI_PATH = os.path.join(_BASE, "jovashi_questions.json")
 YOVASHI_PATH = os.path.join(_BASE, "yovashi_questions.json")
 KETTELL_PATH = os.path.join(_BASE, "kettell_questions.json")
 KETTELL_16PF_C_YOUTH_PATH = os.path.join(_BASE, "kettell_16pf_c_youth.json")
@@ -80,7 +79,6 @@ KOT_QUESTION_IMAGE_PATHS: dict[int, str] = {
 }
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
-HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
 
 REMINDER_CHECK_EVERY_SEC = 60
 REMINDER_AFTER_INACTIVE_MIN = 60
@@ -246,7 +244,7 @@ PROFESSION_TYPES = {
     "Ч-Х": "Человек-Художественный образ",
 }
 
-# --- Таблица самооценки Климова: 30 утверждений, согласие начисляет 1 или 2 балла в столбец П/Т/З/Х/Ч.
+# --- ДДО (Климов): 20 пар утверждений; в каждой паре выбор «а» или «б» начисляет 1 балл в столбец П/Т/З/Х/Ч по таблице ответов методики.
 KLIMOV_SELF_TYPES = {
     "П": "Человек — природа",
     "Т": "Человек — техника",
@@ -390,8 +388,8 @@ CAREER_HINTS_OPG = {
     "Ч-Ч": CAREER_HINTS_DDO["Ч-Ч"],
 }
 
-# --- Таблица ОПТ: вопросы из JSON (модификация Резапкиной) ---
-QUESTIONS_JOVASHI = _load_questions(JOVASHI_PATH)
+# Старый тест «Таблица ОПТ» (jovashi) закрыт, файл вопросов удалён; история результатов из БД обрабатывается дальше.
+QUESTIONS_JOVASHI: list = []
 
 # --- Йоваши: отдельная формулировка вопросов, та же логика подсчёта сфер ---
 QUESTIONS_YOVASHI = _load_questions(YOVASHI_PATH)
@@ -463,7 +461,8 @@ CAREER_HINTS_KETTELL = {
 
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
-QUESTIONS_HOLLAND_RIASEC = _load_questions(HOLLAND_RIASEC_PATH)
+# Тест «Голланд (RIASEC)» закрыт, файл вопросов удалён; история результатов из БД обрабатывается дальше.
+QUESTIONS_HOLLAND_RIASEC: list = []
 
 # Голланд RIASEC: шесть типов; максимум совпадений по ключу (в т.ч. двойной зачёт, напр. 1в → R+I)
 HOLLAND_ORDER = ["R", "I", "S", "C", "E", "A"]
@@ -558,8 +557,7 @@ WELCOME_TEXT = (
     "Привет! Я помогу пройти короткие опросники для профориентации и самопознания.\n"
     "Сначала бот попросит ваши ФИО, затем — согласие на обработку данных и населённый пункт.\n\n"
     "Доступные тесты:\n"
-    "• Дифференциально-диагностический опросник (ДДО) (30 вопросов): отметьте, согласны вы с утверждениями или нет. Узнайте, что вам ближе: природа, техника, знаки, искусство или работа с людьми.\n"
-    "• Опросник профессиональной готовности (ОПГ) (45 вопросов): оцените умение, отношение и желание по шкале 0–2.\n"
+    "• Дифференциально-диагностический опросник (ДДО) (20 пар): в каждой паре выберите, что нравится больше — «а» или «б». Узнайте, что вам ближе: природа, техника, знаки, искусство или работа с людьми.\n"
     "• Йовайши (24 вопроса): узнайте свои профессиональные склонности.\n"
     "• Кеттелл 16PF (187 вопросов): опросник о личностных особенностях для взрослых.\n"
     "• Кеттелл 16PF/C (105 вопросов): версия для молодёжи.\n"
@@ -1634,8 +1632,8 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
     if tid == TEST_KLIMOV_SELF:
         if any(k in scores for k in PROFESSION_TYPES):
             return (
-                "Архив: сохранён результат старого варианта (пары занятий, ключи Ч-П …). "
-                "Текущая методика — 30 утверждений самооценки (П … Ч). Пройдите тест заново для нового ключа.\n"
+                "Архив: сохранён результат старого варианта (30 утверждений самооценки, ключи П … Ч). "
+                "Текущая методика — 20 пар ДДО (П … Ч). Пройдите тест заново для нового ключа.\n"
                 + json.dumps(scores, ensure_ascii=False)
             )
         d_top = top3
@@ -1646,7 +1644,7 @@ def _export_result_summary(tid: str, scores: dict, top3: list) -> str:
                 reverse=True,
             )[:3]
         out_lines: list[str] = [
-            "ДДО (самооценка по Климову): топ-3 столбца по сумме баллов (максимум по столбцу см. ниже):"
+            "ДДО (Климов): топ-3 столбца по сумме баллов (максимум по столбцу см. ниже):"
         ]
         for i, (ptype, points) in enumerate(d_top, 1):
             mx = KLIMOV_SELF_MAX_BY_CATEGORY.get(ptype, 10)
@@ -2509,8 +2507,8 @@ def finish_test(vk, user_id: int, test_id: str, scores: dict):
 
     if tid == TEST_KLIMOV_SELF:
         title = (
-            "📊 Результат по ДДО (ориентировочное определение типа будущей специальности по самооценке; "
-            "столбцы П, Т, З, Х, Ч):"
+            "📊 Результат по ДДО (ориентировочное определение типа будущей специальности по выбору "
+            "в парах «Мне нравится…»; столбцы П, Т, З, Х, Ч):"
         )
         lines = [title, ""]
         for pk in KLIMOV_SELF_DISPLAY_ORDER:
