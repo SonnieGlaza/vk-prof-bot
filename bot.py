@@ -334,8 +334,8 @@ def _opg_flat_index(step: int, scores: dict) -> int:
 
 
 def _opg_scores_storable(scores: dict) -> dict:
-    """Без служебного __opg_flow — не пишем в итог сессии / test_results."""
-    return {k: v for k, v in scores.items() if k != OPG_FLOW_KEY}
+    """Убирает служебные поля из сохранённого результата ОПГ."""
+    return {k: v for k, v in scores.items() if k not in (OPG_FLOW_KEY, BACK_HISTORY_KEY)}
 
 
 def _opg_sphere_for_item(n: int) -> str:
@@ -1256,22 +1256,23 @@ def delete_last_answer_log(session_id: int):
         conn.commit()
 
 
-def _last_answer_weights(session_id: int) -> dict | None:
-    """Веса последнего ответа сессии (fallback, если в scores нет истории возврата)."""
+def _last_answer_record(session_id: int) -> tuple[int, dict] | None:
+    """Последний ответ сессии; нужен для отката старых сохранённых прогрессов без истории."""
     with db_connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT weights_json FROM answer_log WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT step_index, weights_json FROM answer_log WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             (session_id,),
         )
         row = cur.fetchone()
     if not row:
         return None
     try:
-        data = json.loads(row[0])
-    except (TypeError, ValueError):
+        step_index = int(row[0])
+        data = json.loads(row[1])
+    except (TypeError, ValueError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    return (step_index, data) if isinstance(data, dict) else None
 
 
 def complete_test_session(session_id: int, user_id: int, scores: dict, status: str = "completed"):
@@ -2394,7 +2395,7 @@ def keyboard_for_test(test_id: str, step: int = 0, scores: dict | None = None):
         nopts = len(qs[idx]["options"]) if 0 <= idx < len(qs) else 2
     else:
         nopts = len(qs[step]["options"]) if step < len(qs) else 2
-    show_back = tid != TEST_OPG and int(step) > 0
+    show_back = bool(scores and scores.get(BACK_HISTORY_KEY)) if tid == TEST_OPG else int(step) > 0
     if nopts > 6:
         return build_answer_keyboard_many(nopts, show_back=show_back)
     if nopts == 6:
@@ -2878,38 +2879,76 @@ def _is_back_command(text: str) -> bool:
 
 
 def _go_back(vk, user_id: int, tid: str, step: int, scores: dict, progress: dict):
-    """Откат на один вопрос назад: вычитаем веса последнего ответа и перепоказываем вопрос."""
+    """Откатывает ровно один ответ, включая одну из трёх частей ОПГ."""
     sid = progress.get("last_session_id")
-    if tid == TEST_OPG:
-        send_message(vk, user_id, "Вернуться на предыдущий вопрос в этом тесте нельзя.")
-        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step, scores), scores=scores)
+    hist = scores.get(BACK_HISTORY_KEY)
+    entry = hist[-1] if isinstance(hist, list) and hist else None
+    weights = entry.get("weights") if isinstance(entry, dict) else None
+
+    if weights is None and sid:
+        last_record = _last_answer_record(sid)
+        if last_record:
+            answer_index, weights = last_record
+            if tid == TEST_OPG:
+                entry = {
+                    "step": answer_index // 3,
+                    "part": answer_index % 3,
+                }
+            else:
+                entry = {"step": int(step) - 1}
+
+    if not isinstance(weights, dict) or not weights or not isinstance(entry, dict):
+        send_message(vk, user_id, "Это уже первый вопрос теста.")
+        send_question_message(
+            vk,
+            user_id,
+            tid,
+            step,
+            keyboard=keyboard_for_test(tid, step, scores if tid == TEST_OPG else None),
+            scores=scores if tid == TEST_OPG else None,
+        )
         return
-    if int(step) <= 0:
+
+    target_step = int(entry.get("step", int(step) - 1))
+    target_part = int(entry.get("part", 0) or 0)
+    if tid != TEST_OPG and target_step < 0:
         send_message(vk, user_id, "Это уже первый вопрос теста.")
         send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
         return
-    weights = None
-    hist = scores.get(BACK_HISTORY_KEY)
-    if isinstance(hist, list) and hist:
-        last = hist.pop()
-        if isinstance(last, dict) and isinstance(last.get("weights"), dict):
-            weights = last["weights"]
-        if not hist:
-            scores.pop(BACK_HISTORY_KEY, None)
-    if weights is None and sid:
-        weights = _last_answer_weights(sid)
-    if not isinstance(weights, dict) or not weights:
-        send_message(vk, user_id, "Не получилось откатить ответ. Напишите «меню», если хотите начать заново.")
-        send_question_message(vk, user_id, tid, step, keyboard=keyboard_for_test(tid, step))
-        return
+
     for ptype, value in weights.items():
         if ptype in scores and isinstance(scores[ptype], (int, float)):
-            scores[ptype] = scores[ptype] - int(value)
-    new_step = int(step) - 1
+            scores[ptype] = max(0, scores[ptype] - value)
+
+    if isinstance(hist, list) and hist:
+        hist.pop()
+        if not hist:
+            scores.pop(BACK_HISTORY_KEY, None)
+
+    if tid == TEST_OPG:
+        questions = questions_for(tid)
+        flat_index = target_step * 3 + target_part
+        if not 0 <= flat_index < len(questions):
+            send_message(vk, user_id, "Не получилось вернуться к этому вопросу. Продолжайте тест или напишите «меню».")
+            return
+        item = questions[flat_index]
+        item_no = entry.get("item") or item.get("opg_item")
+        dimension = entry.get("dim") or item.get("opg_dim")
+        meta = scores.get(OPG_META_KEY)
+        meta_key = str(int(item_no)) if item_no is not None else None
+        if isinstance(meta, dict) and meta_key in meta and dimension:
+            item_scores = meta[meta_key]
+            if isinstance(item_scores, dict):
+                item_scores.pop(dimension, None)
+                if not item_scores:
+                    meta.pop(meta_key, None)
+        flow = _opg_ensure_flow(scores)
+        flow["part"] = target_part
+
     save_progress(
         user_id=user_id,
         test_id=tid,
-        step=new_step,
+        step=target_step,
         scores=scores,
         status="in_progress",
         last_session_id=sid,
@@ -2917,7 +2956,14 @@ def _go_back(vk, user_id: int, tid: str, step: int, scores: dict, progress: dict
     if sid:
         delete_last_answer_log(sid)
     send_message(vk, user_id, "⬅ Вернулись на один вопрос назад. Выберите вариант заново.")
-    send_question_message(vk, user_id, tid, new_step, keyboard=keyboard_for_test(tid, new_step))
+    send_question_message(
+        vk,
+        user_id,
+        tid,
+        target_step,
+        keyboard=keyboard_for_test(tid, target_step, scores if tid == TEST_OPG else None),
+        scores=scores if tid == TEST_OPG else None,
+    )
 
 
 def handle_answer(vk, user_id: int, text: str):
@@ -3028,6 +3074,17 @@ def handle_answer(vk, user_id: int, text: str):
             st[od] = int(next(iter(weights.values())))
         flow = _opg_ensure_flow(scores)
         part = int(flow.get("part", 0) or 0)
+        hist = scores.get(BACK_HISTORY_KEY)
+        if not isinstance(hist, list):
+            hist = []
+            scores[BACK_HISTORY_KEY] = hist
+        hist.append({
+            "step": int(step),
+            "part": part,
+            "item": int(oi) if oi is not None else None,
+            "dim": od,
+            "weights": dict(weights),
+        })
         if part < 2:
             flow["part"] = part + 1
             save_progress(
@@ -3453,7 +3510,10 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         return handle_stats_command(vk, user_id, text)
     if handle_onboarding_message(vk, user_id, text):
         return True
-    if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"):
+    if _is_back_command(stripped):
+        handle_answer(vk, user_id, stripped)
+        return True
+    if t in ("привет", "старт", "start", "меню", "menu", "/start", "начать", "hello", "hi"): 
         send_welcome(vk, user_id)
         return True
     if stripped == "Меню":
@@ -3574,7 +3634,7 @@ def main():
                         continue
                     if handle_reminder_continue_choice(vk, user_id, raw_cmd):
                         continue
-                    if text_lower in ("1", "2", "3", "4"):
+                    if text_lower in ("1", "2", "3", "4") or _is_back_command(text_lower):
                         handle_answer(vk, user_id, text_lower)
                     else:
                         send_message(
