@@ -1,3 +1,4 @@
+import base64
 import contextvars
 import io
 import json
@@ -6,6 +7,7 @@ import re
 import threading
 import time
 import unicodedata
+import zlib
 from datetime import datetime, timedelta, timezone
 
 import openpyxl
@@ -80,6 +82,29 @@ KOT_QUESTION_IMAGE_PATHS: dict[int, str] = {
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
 HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
+# Встроенная копия нужна для Railway/Docker-сборок, в которые по ошибке не попал JSON-файл.
+HOLLAND_RIASEC_FALLBACK_B85 = (
+    "c-qZcyKWmt6z%mD16C418REmXlqLuS6>6>0@CT%c6C|BsfTYOChUF;gg8-@AQp;U>#mDj&X8tJmp4p`sF`UIX$3SdY)~v*No"
+    "clWW%)Z<+=8gO_rtwqb8`Ee#G4_)i*uvO5JGZ%=+RWIMj#GE(-r4NiM$`ZP>mPsl{`C((%cuMV@~9<)m*qf)^6{lkAYU`rJC"
+    "tcNH<CdiGZ%JJPNaX{tiO|wy^vX2>j!Vk?_O2E-Dn3_u``)_>H2QqdhXKB^f0a$T&ubH<ow@P->XJ%n~xxCGa+*yWr|F9?Rv"
+    "UzJGQAzS*)?k?Tm$6qSL!8Zx>x@B`YUxuxtMFEvznLvFcFWtI!?e5U{aPqsuXtaDhaI#$DOm_2F)b`(PKcmf~tBIPXIKF7a3"
+    "#Wrarx;8&P4yI=vW+Yu{b<;1;L8=8Ij{tipt!MZa$HtNZ42(vHbP`}DJKiIX2i!E!M##*CG_1q!OQDW<cOz_lDVra3XSa-LB"
+    "o^C;M77NK!DkOdR<XCsDA!g_9+SotrC;Jx*8%+(L1(SQ9`*uxxwuQ@gvA8^=2JQ+aAcwmIOTl?0AS(eompqv(<huch&Rfr^Z"
+    "gJ_Z+$}QCy}@P|p|l>0!JW)MvJ-KOxzFsuaEU?Tn4B+iHNIG^*qtpR4=?$Cj4I&4MN-csO!WU8X?^h!jKOe;!R3S+9CPe+BB"
+    "dzTqp;j!fg*&1hnylhGqjG_lo4q&tC*Y7`YrW&DvtfZAl)t94SuGE&W(VjIX0^*x4Vf9`<>1NI-zTX><}GAtroe)6krNtShn"
+    "(ec>P$sD3Dw)ViOA}j56&+rj=DBmZUt-YfDcQI$SzEKmrI>$5<GYP|jp0efWn$kto`{fZ~$mC1}}L6QFK7(v1V@1h9&iO}X~"
+    "(l9`6`M$f6sHo+5c5)N)8sVNm7n1*|^crSQLFDj{GVK&HDF6A;)Z}#D=T(zf<ZQe9!Pu`1xCs<LdQQ2e%66{$lT|+R{7UX#F"
+    "xO7!(&J5k#eb{+k#0L@1USRSsVZs3nsGJpfE``?wO%;j2MgxrSDH)sQ*2B%ZPb2azE{DBBdKn0tuZjQDXk2oYg2DtoKDnOI+"
+    "uN)nAD$)o$xw6`(BTH|(v&^?%3ZtPO0h}x8Rc&3`IAj?%jPWC>Vre}5Mr9xt`9L7V*RXEM~IRDxf~enAV9iP?eFWf$TibOM^"
+    "?K<&NnDnvc*R#A20J{vcnuS?v~gOwb^<w^lStWwIB3CXaWVPAc_R-4!QOg><F01bgJ~0z0yCf4``{jP3EzWWNWG`Xm%WxwY}"
+    "!PBt9Itis}|$*whOkm{)T{5E!fEzXZuen<fW+2UGh?sLapfMy%ej6039NOYX)_HMN+1twlihp>dXz%<vFm&jHWxp3(g-L(7m"
+    "NW@@?m|58+F)44EwE-&>VDj@2(v(0{$7mCN^P|V5;w}f7u(Q+kE3?ki!a#7vht@T`}fbrdE03fcA3oBy7HAyvAd-2`-=FO+3"
+    "y%|zT0p^JAo~TB2j>yt~hC9yq7~g%FU0#Jv!=*9)<Snuu1tm_5r8Qs_LLk21@j@_LNa)ZBZCS9roIs}ZDYTjamC|-P<nob~;"
+    "hW>`qDQ<A-b^>bJBEG<a3uc<#66E{bhs2(>&O87NyUIM^<5W#RaA)-yyU<YX+00m$o<Yk#Hm!p3kojLRHegDQ~L(Vc|0libr"
+    ">jUGo6O@pZM3Bo_~d&pW5>xDN=Qg&N2CdqQGtCDs-3jCGFVKze*<*{gzo0PRO}0MgKEXM#t+U9+iW&@*%I9{ciu{Rf6sjnK<"
+    "i994b@ND6`j3QqiCL)XuWYriX?5=mt&mAFsyhaDW$xbWh8G-8R<)K#mqAd#Uag_GM}vm1E@x2P_9EuPEf}=Q>(in=1ES?fnf"
+    "9pS9T"
+)
 
 REMINDER_CHECK_EVERY_SEC = 60
 REMINDER_AFTER_INACTIVE_MIN = 60
@@ -467,7 +492,15 @@ CAREER_HINTS_KETTELL = {
 
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
-QUESTIONS_HOLLAND_RIASEC = _load_questions(HOLLAND_RIASEC_PATH)
+try:
+    QUESTIONS_HOLLAND_RIASEC = _load_questions(HOLLAND_RIASEC_PATH)
+except FileNotFoundError:
+    QUESTIONS_HOLLAND_RIASEC = json.loads(
+        zlib.decompress(base64.b85decode(HOLLAND_RIASEC_FALLBACK_B85.encode("ascii"))).decode("utf-8")
+    )
+    if not isinstance(QUESTIONS_HOLLAND_RIASEC, list) or len(QUESTIONS_HOLLAND_RIASEC) != 42:
+        raise RuntimeError("Встроенный резервный банк Голланда повреждён")
+    print("[questions] holland_riasec_questions.json missing; using embedded 42-question backup")
 
 # Голланд RIASEC: шесть типов; максимум совпадений по ключу (в т.ч. двойной зачёт, напр. 1в → R+I)
 HOLLAND_ORDER = ["R", "I", "S", "C", "E", "A"]
