@@ -79,6 +79,7 @@ KOT_QUESTION_IMAGE_PATHS: dict[int, str] = {
 }
 EN60_PATH = os.path.join(_BASE, "en60_questions.json")
 EN57_PATH = os.path.join(_BASE, "en57_questions.json")
+HOLLAND_RIASEC_PATH = os.path.join(_BASE, "holland_riasec_questions.json")
 
 REMINDER_CHECK_EVERY_SEC = 60
 REMINDER_AFTER_INACTIVE_MIN = 60
@@ -190,9 +191,9 @@ LABEL_PROF_TABLE = (
     "Таблица для ориентировочного определения предпочтительности типа будущей профессии"
 )
 LABEL_KETTELL = "Кеттелл 16PF"
-LABEL_KETTELL_16PF_C_YOUTH = "Кеттелл 16PF/C (молодёжь)"
+LABEL_KETTELL_16PF_C_YOUTH = "Кеттелл 16PF/C (подр.)"
 LABEL_KOT = "КОТ (краткий ориентировочный тест)"
-LABEL_EN60 = "ЭН - 60"
+LABEL_EN60 = "ЭН - 60 (подр.)"
 LABEL_EN57 = "ЭН - 57"
 LABEL_HOLLAND = "Голланд (RIASEC, пары профессий)"
 LABEL_YOVASHI = "Йовайши (проф. склонности, модиф. Резапкиной)"
@@ -204,9 +205,9 @@ KB_OPG = "ОПГ"
 KB_PROF_TABLE = "Таблица (ОПТ проф.)"
 KB_YOVASHI = "Йовайши"
 KB_KETTELL = "Кеттелл 16PF"
-KB_KETTELL_16PF_C_YOUTH = "16PF/C (мол.)"
+KB_KETTELL_16PF_C_YOUTH = "16PF/C (подр.)"
 KB_KOT = "КОТ"
-KB_EN60 = "ЭН - 60"
+KB_EN60 = "ЭН - 60 (подр.)"
 KB_EN57 = "ЭН - 57"
 KB_HOLLAND = "Голланд"
 
@@ -466,8 +467,7 @@ CAREER_HINTS_KETTELL = {
 
 QUESTIONS_EN60 = _load_questions(EN60_PATH)
 QUESTIONS_EN57 = _load_questions(EN57_PATH)
-# Тест «Голланд (RIASEC)» закрыт, файл вопросов удалён; история результатов из БД обрабатывается дальше.
-QUESTIONS_HOLLAND_RIASEC: list = []
+QUESTIONS_HOLLAND_RIASEC = _load_questions(HOLLAND_RIASEC_PATH)
 
 # Голланд RIASEC: шесть типов; максимум совпадений по ключу (в т.ч. двойной зачёт, напр. 1в → R+I)
 HOLLAND_ORDER = ["R", "I", "S", "C", "E", "A"]
@@ -563,10 +563,11 @@ WELCOME_TEXT = (
     "• Дифференциально-диагностический опросник (ДДО) (20 пар): в каждой паре выберите, что нравится больше — «а» или «б». Узнайте, что вам ближе: природа, техника, знаки, искусство или работа с людьми.\n"
     "• Йовайши (24 вопроса): узнайте свои профессиональные склонности.\n"
     "• Кеттелл 16PF (187 вопросов): опросник о личностных особенностях для взрослых.\n"
-    "• Кеттелл 16PF/C (105 вопросов): версия для молодёжи.\n"
+    "• Кеттелл 16PF/C (подр.) (105 вопросов): версия для подростков.\n"
     "• Краткий отборочный тест (КОТ) (50 вопросов): задания на логику, внимание и словарный запас.\n"
-    "• ЭН-60 (60 вопросов): опросник для детей и подростков; оцениваются шкалы E, N и социальная желательность.\n"
-    "• ЭН-57 (57 вопросов): личностный опросник для взрослых.\n\n"
+    "• ЭН-60 (подр.) (60 вопросов): опросник для подростков; оцениваются шкалы E, N и социальная желательность.\n"
+    "• ЭН-57 (57 вопросов): личностный опросник для взрослых.\n"
+    "• Голланд (42 пары): выберите более близкую профессию в каждой паре и узнайте свои интересы по шести типам RIASEC.\n\n"
     "Нажмите кнопку с названием теста или напишите его название в чат. Выбирайте ответы кнопками. Напишите «меню», чтобы вернуться к списку."
 )
 
@@ -1127,18 +1128,21 @@ def get_progress(user_id: int):
                             reminder_pending=rp,
                             last_session_id=lsid,
                         )
-        if tid == TEST_HOLLAND_RIASEC and scores and not set(scores.keys()) <= set(HOLLAND_ORDER):
-            scores = empty_scores(TEST_HOLLAND_RIASEC)
-            step = 0
-            save_progress(
-                user_id=user_id,
-                test_id=TEST_HOLLAND_RIASEC,
-                step=step,
-                scores=scores,
-                status=status,
-                reminder_pending=rp,
-                last_session_id=lsid,
-            )
+        if tid == TEST_HOLLAND_RIASEC and scores:
+            extra = set(scores.keys()) - set(HOLLAND_ORDER)
+            history_ok = extra == {BACK_HISTORY_KEY} and isinstance(scores.get(BACK_HISTORY_KEY), list)
+            if extra and not history_ok:
+                scores = empty_scores(TEST_HOLLAND_RIASEC)
+                step = 0
+                save_progress(
+                    user_id=user_id,
+                    test_id=TEST_HOLLAND_RIASEC,
+                    step=step,
+                    scores=scores,
+                    status=status,
+                    reminder_pending=rp,
+                    last_session_id=lsid,
+                )
         if tid == TEST_KOT and step >= len(QUESTIONS_KOT):
             scores = empty_scores(TEST_KOT)
             step = 0
@@ -2280,7 +2284,7 @@ def users_for_reminder():
                     AND p.consent_expires_at > ?
               )
             """,
-            (TEST_JOVASHI, TEST_HOLLAND_RIASEC, inactive_threshold, repeat_threshold, ts),
+            (TEST_OPG, TEST_JOVASHI, inactive_threshold, repeat_threshold, ts),
         )
         rows = cur.fetchall()
         return [r[0] for r in rows]
@@ -2370,8 +2374,8 @@ def build_consent_keyboard():
 def build_menu_keyboard():
     kb = VkKeyboard(one_time=False, inline=False)
     kb.add_button(KB_KLIMOV_SELF, color=VkKeyboardColor.POSITIVE)
-    kb.add_button(KB_OPG, color=VkKeyboardColor.POSITIVE)
     kb.add_button(KB_YOVASHI, color=VkKeyboardColor.POSITIVE)
+    kb.add_button(KB_HOLLAND, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
     kb.add_button(KB_KETTELL, color=VkKeyboardColor.POSITIVE)
     kb.add_line()
@@ -2714,7 +2718,7 @@ def start_test(vk, user_id: int, test_id: str):
     if not user_profile_is_complete(user_id):
         send_welcome(vk, user_id)
         return
-    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+    if tid in (TEST_OPG, TEST_JOVASHI):
         send_message(
             vk,
             user_id,
@@ -2807,8 +2811,8 @@ def handle_onboarding_message(vk, user_id: int, text: str) -> bool:
         "ддо", "климов", "самооценка", "климов30", "опг", "opg", "таблица", "таблица опт", "опт",
         "таблица (опт проф.)",
         "голланд", "holland", "riasec", "йовайши", "йоваши", "yovashi", "iovashi", "jovashi",
-        "кеттелл", "kettell", "cattell", "16pf", "16пф", "16pfc", "16пфс", "16pf/c (мол.)",
-        "кот", "kot", "эн-60", "эн60", "эн - 60", "en-60", "en60", "эн-57", "эн57", "эн - 57", "en-57", "en57",
+        "кеттелл", "kettell", "cattell", "16pf", "16пф", "16pfc", "16пфс", "16pf/c (мол.)", "16pf/c (подр.)", "кеттелл 16pf/c (подр.)",
+        "кот", "kot", "эн-60", "эн60", "эн - 60", "эн - 60 (подр.)", "эн-60 (подр.)", "en-60", "en60", "эн-57", "эн57", "эн - 57", "en-57", "en57",
     ):
         send_welcome(vk, user_id)
         return True
@@ -2981,7 +2985,7 @@ def handle_answer(vk, user_id: int, text: str):
         return
     test_id = progress["test_id"]
     tid = normalize_test_id(test_id)
-    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+    if tid in (TEST_OPG, TEST_JOVASHI):
         abandon_progress(user_id, progress.get("last_session_id"))
         send_message(
             vk,
@@ -3455,7 +3459,7 @@ def handle_reminder_continue_choice(vk, user_id: int, text: str) -> bool:
     if not user_profile_is_complete(user_id):
         send_welcome(vk, user_id)
         return True
-    if tid in (TEST_JOVASHI, TEST_HOLLAND_RIASEC):
+    if tid in (TEST_OPG, TEST_JOVASHI):
         abandon_progress(user_id, progress.get("last_session_id"))
         send_message(
             vk,
@@ -3522,9 +3526,6 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if t in ("климов", "самооценка", "климов30", "ддо"):
         start_test(vk, user_id, TEST_KLIMOV_SELF)
         return True
-    if t in ("опг", "opg"):
-        start_test(vk, user_id, TEST_OPG)
-        return True
     if t in ("йовайши", "йоваши", "yovashi", "iovashi", "jovashi"):
         start_test(vk, user_id, TEST_YOVASHI)
         return True
@@ -3532,24 +3533,24 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
         start_test(vk, user_id, TEST_KETTELL)
         return True
     _t_compact = re.sub(r"[\s/_-]+", "", t.lower())
-    if _t_compact in ("16pfc", "16пфс", "kettell16pfc") or ("16pf" in t.lower() and "/c" in stripped.lower()):
+    if _t_compact in ("16pfc", "16пфс", "kettell16pfc", "16pfc(подр.)", "kettell16pfc(подр.)") or ("16pf" in t.lower() and "/c" in stripped.lower()):
         start_test(vk, user_id, TEST_KETTELL_16PF_C_YOUTH)
         return True
     if t in ("кот", "kot"):
         start_test(vk, user_id, TEST_KOT)
         return True
-    if t.replace(" ", "") in ("эн-60", "эн60", "en-60", "en60"):
+    if t.replace(" ", "") in ("эн-60", "эн60", "эн-60(подр.)", "en-60", "en60"):
         start_test(vk, user_id, TEST_EN60)
         return True
     if t.replace(" ", "") in ("эн-57", "эн57", "en-57", "en57"):
         start_test(vk, user_id, TEST_EN57)
         return True
+    if t in ("голланд", "holland", "riasec"):
+        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
+        return True
     # Подписи с клавиатуры (с заглавной)
     if stripped == KB_KLIMOV_SELF:
         start_test(vk, user_id, TEST_KLIMOV_SELF)
-        return True
-    if stripped == KB_OPG:
-        start_test(vk, user_id, TEST_OPG)
         return True
     if stripped == KB_YOVASHI:
         start_test(vk, user_id, TEST_YOVASHI)
@@ -3569,7 +3570,10 @@ def dispatch_command(vk, user_id: int, text: str) -> bool:
     if stripped == KB_EN57:
         start_test(vk, user_id, TEST_EN57)
         return True
-    if t in ("таблица", "таблица опт", "опт", "голланд", "holland", "riasec") or stripped in (KB_PROF_TABLE, KB_HOLLAND):
+    if stripped == KB_HOLLAND:
+        start_test(vk, user_id, TEST_HOLLAND_RIASEC)
+        return True
+    if t in ("опг", "opg", "таблица", "таблица опт", "опт") or stripped in (KB_OPG, KB_PROF_TABLE):
         send_message(
             vk,
             user_id,
