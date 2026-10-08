@@ -721,7 +721,7 @@ def _dispatch_max_update(api: MaxApiCompat, update: dict) -> None:
         if core.handle_reminder_continue_choice(api, internal_user_id, text):
             log.info("[MAX] reminder choice handled")
             return
-        if text.strip().isdigit():
+        if text.strip().isdigit() or core._is_back_command(text):
             core.handle_answer(api, internal_user_id, text.strip())
             log.info("[MAX] answer handled")
         else:
